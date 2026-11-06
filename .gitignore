@@ -6,3 +6,6 @@ Nvidia.ts
 nvidia.api.ts
 nvidia.routes.ts
 prisma.config.ts
+.env
+.env.*
+!.env.example
