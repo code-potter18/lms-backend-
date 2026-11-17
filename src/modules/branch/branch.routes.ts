@@ -8,7 +8,7 @@ import {
 } from "./branch.validation";
 import { authenticate } from "../auth/auth.middleware";
 import { authorize, authorizeRoles } from "../../middleware/authorize";
-import { TOP_LEVEL_ADMIN_ROLES } from "../../permissions/roles";
+import { STAFF_LOGIN_ROLES, TOP_LEVEL_ADMIN_ROLES } from "../../permissions/roles";
 
 const router = Router();
 
@@ -31,8 +31,18 @@ router.get(
 );
 
 // Existing routes
-router.get("/", authenticate, controller.getAllBranches.bind(controller));
-router.get("/:branchId", authenticate, controller.getBranchById.bind(controller));
+router.get(
+  "/",
+  authenticate,
+  authorizeRoles(...STAFF_LOGIN_ROLES),
+  controller.getAllBranches.bind(controller)
+);
+router.get(
+  "/:branchId",
+  authenticate,
+  authorizeRoles(...STAFF_LOGIN_ROLES),
+  controller.getBranchById.bind(controller)
+);
 router.post("/", authenticate, authorize("branch.create"), createBranchValidation, controller.createBranch.bind(controller));
 router.put("/:branchId", authenticate, authorize("branch.update"), updateBranchValidation, controller.updateBranch.bind(controller));
 router.delete("/:branchId", authenticate, authorize("branch.delete"), controller.deleteBranch.bind(controller));

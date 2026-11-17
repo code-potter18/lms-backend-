@@ -6,6 +6,36 @@ const service = new PatientService();
 
 export class PatientController {
 
+    async checkContactDuplicates(req: Request, res: Response) {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    message: errors.array()[0].msg,
+                    errors: errors.array()
+                });
+            }
+
+            const matches = await service.findContactDuplicates(
+                String(req.body.mobile ?? ""),
+                typeof req.body.email === "string" ? req.body.email : undefined,
+                typeof req.query.branchId === "string" ? req.query.branchId : undefined
+            );
+
+            return res.json({
+                success: true,
+                message: "Patient contact matches checked successfully",
+                data: { matches }
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
     async createPatient(req: Request, res: Response) {
 
         try {
@@ -141,6 +171,34 @@ export class PatientController {
 
         }
 
+    }
+
+    async updatePatientEmail(req: Request, res: Response) {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    message: errors.array()[0].msg,
+                    errors: errors.array()
+                });
+            }
+
+            const patient = await service.updatePatientEmail(
+                String(req.params.patientId),
+                String(req.body.email)
+            );
+            return res.json({
+                success: true,
+                message: "Patient email updated successfully",
+                data: patient
+            });
+        } catch (error) {
+            return res.status(400).json({
+                success: false,
+                message: error instanceof Error ? error.message : "Patient email update failed"
+            });
+        }
     }
 
     async createPatientHistory(req: Request, res: Response) {

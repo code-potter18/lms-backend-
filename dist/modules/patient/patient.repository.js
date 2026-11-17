@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PatientRepository = void 0;
+const client_1 = require("@prisma/client");
 const prisma_1 = __importDefault(require("../../config/prisma"));
 class PatientRepository {
     async findUsername(username) {
@@ -23,9 +24,42 @@ class PatientRepository {
     async findEmail(email) {
         return prisma_1.default.patient_bio_data.findFirst({
             where: {
-                patient_email: email
+                patient_email: {
+                    equals: email.trim(),
+                    mode: "insensitive"
+                }
             }
         });
+    }
+    async findContactDuplicates(phoneVariants, email, branchId) {
+        if (phoneVariants.length === 0 && !email) {
+            return [];
+        }
+        const primaryPhoneMatch = phoneVariants.length > 0
+            ? client_1.Prisma.sql `regexp_replace(COALESCE("patient_primary_mobile", ''), '[^0-9]', '', 'g') IN (${client_1.Prisma.join(phoneVariants)})`
+            : client_1.Prisma.sql `FALSE`;
+        const mobileMatch = primaryPhoneMatch;
+        const emailMatch = email
+            ? client_1.Prisma.sql `LOWER(BTRIM(COALESCE("patient_email", ''))) = ${email}`
+            : client_1.Prisma.sql `FALSE`;
+        const branchFilter = branchId
+            ? client_1.Prisma.sql `AND "branch_id" = ${branchId}`
+            : client_1.Prisma.empty;
+        return prisma_1.default.$queryRaw(client_1.Prisma.sql `
+            SELECT
+                "patient_id",
+                "patient_first_name",
+                "patient_middle_name",
+                "patient_last_name",
+                "patient_primary_mobile",
+                "patient_email",
+                ${mobileMatch} AS "matched_by_mobile",
+                ${emailMatch} AS "matched_by_email"
+            FROM "patient_bio_data"
+            WHERE (${mobileMatch} OR ${emailMatch})
+            ${branchFilter}
+            ORDER BY "id" DESC
+        `);
     }
     async findBranch(branchId) {
         return prisma_1.default.branch.findUnique({

@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.LabOrderItemService = void 0;
+const crypto_1 = require("crypto");
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const lab_order_item_repository_1 = require("./lab-order-item.repository");
 const repository = new lab_order_item_repository_1.LabOrderItemRepository();
@@ -37,7 +38,7 @@ class LabOrderItemService {
             throw new Error("Lab Test is inactive");
         }
         // Generate ID
-        const lab_order_item_id = `LOI${Date.now()}`;
+        const lab_order_item_id = `LOI${Date.now()}${(0, crypto_1.randomUUID)().replace(/-/g, "")}`;
         // Read price from Lab Test Master
         const price = Number(test.price ?? 0);
         // Discount

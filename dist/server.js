@@ -107,6 +107,12 @@ app.use((0, cors_1.default)({
     optionsSuccessStatus: 200,
 }));
 app.use((0, compression_1.default)());
+app.use("/api/lab-report/whatsapp/webhook", express_1.default.json({
+    limit: "1mb",
+    verify: (req, _res, buffer) => {
+        req.rawBody = buffer;
+    },
+}));
 app.use(express_1.default.json({ limit: "50mb" }));
 app.use(express_1.default.urlencoded({ extended: true, limit: "50mb" }));
 app.use((0, cookie_parser_1.default)());

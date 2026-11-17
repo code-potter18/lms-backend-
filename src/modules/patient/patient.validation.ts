@@ -1,5 +1,17 @@
 import { body } from "express-validator";
 
+export const checkPatientContactDuplicatesValidation = [
+    body("mobile")
+        .isString()
+        .trim()
+        .notEmpty()
+        .withMessage("Mobile number is required"),
+    body("email")
+        .optional({ nullable: true, checkFalsy: true })
+        .isEmail()
+        .withMessage("Valid email is required"),
+];
+
 export const createPatientValidation = [
 
     body("username")
@@ -19,9 +31,27 @@ export const createPatientValidation = [
         .withMessage("Valid mobile number is required"),
 
     body("email")
-        .optional()
+        .if(body("registration_source").equals("LAB_WALK_IN"))
+        .isString()
+        .withMessage("Email is required for lab walk-in registration")
+        .bail()
+        .trim()
+        .notEmpty()
+        .withMessage("Email is required for lab walk-in registration")
+        .bail()
         .isEmail()
-        .withMessage("Valid email is required"),
+        .withMessage("Valid email is required")
+        .bail()
+        .isLength({ max: 254 })
+        .withMessage("Email must be 254 characters or fewer"),
+
+    body("email")
+        .optional({ nullable: true, checkFalsy: true })
+        .isEmail()
+        .withMessage("Valid email is required")
+        .bail()
+        .isLength({ max: 254 })
+        .withMessage("Email must be 254 characters or fewer"),
 
     body("branch_id")
         .notEmpty()
@@ -85,7 +115,10 @@ export const updatePatientValidation = [
     body("email")
         .optional()
         .isEmail()
-        .withMessage("Valid email is required"),
+        .withMessage("Valid email is required")
+        .bail()
+        .isLength({ max: 254 })
+        .withMessage("Email must be 254 characters or fewer"),
 
     // Referral details — required/validated only when patient_type is "Referral"
     body("referral_type")
@@ -129,6 +162,20 @@ export const updatePatientValidation = [
         .isLength({ max: 2000 })
         .withMessage("Referral notes must not exceed 2000 characters"),
 
+];
+
+export const updatePatientEmailValidation = [
+    body("email")
+        .isString()
+        .trim()
+        .notEmpty()
+        .withMessage("Email is required")
+        .bail()
+        .isEmail()
+        .withMessage("Valid email is required")
+        .bail()
+        .isLength({ max: 254 })
+        .withMessage("Email must be 254 characters or fewer"),
 ];
 
 export const createPatientHistoryValidation = [

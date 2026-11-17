@@ -304,6 +304,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   // LAB_TECHNICIAN
   LAB_TECHNICIAN: [
     "employee.read",
+    "patient.create",
     "patient.read",
     "department.read",
     "appointment.read",

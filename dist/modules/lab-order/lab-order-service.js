@@ -6,6 +6,18 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const lab_order_repository_1 = __importDefault(require("./lab-order-repository"));
 const idGenerator_1 = require("../../utils/idGenerator");
+const MAX_LAB_ORDER_ID_ATTEMPTS = 10;
+let lastLabOrderTimestamp = 0;
+function nextLabOrderId() {
+    lastLabOrderTimestamp = Math.max(Date.now(), lastLabOrderTimestamp + 1);
+    return `LAB${lastLabOrderTimestamp}`;
+}
+function isUniqueConstraintError(error) {
+    return typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "P2002";
+}
 class LabOrderService {
     async create(data) {
         // Resolve patient history: accept patient_history_id directly or
@@ -77,14 +89,11 @@ class LabOrderService {
                 throw new Error("Appointment not found");
             }
         }
-        // Generate Lab Order ID
-        const lab_order_id = `LAB${Date.now()}`;
         // Explicit payload — lab_order has NO patient_id column, only
         // patient_history_id (resolved above), so it must never be spread.
-        return lab_order_repository_1.default.create({
+        const orderData = {
             patient_history_id,
             doctor_employee_id: data.doctor_employee_id,
-            lab_order_id,
             ...(data.appointment_id ? { appointment_id: data.appointment_id } : {}),
             ...(data.department_id ? { department_id: data.department_id } : {}),
             ...(data.priority ? { priority: data.priority } : {}),
@@ -93,7 +102,24 @@ class LabOrderService {
             ...(data.lab_description !== undefined ? { lab_description: data.lab_description } : {}),
             ...(data.branch_id ? { branch_id: data.branch_id } : {}),
             ...(data.user_id ? { user_id: data.user_id } : {})
-        });
+        };
+        for (let attempt = 0; attempt < MAX_LAB_ORDER_ID_ATTEMPTS; attempt += 1) {
+            try {
+                return await lab_order_repository_1.default.create({
+                    ...orderData,
+                    lab_order_id: nextLabOrderId()
+                });
+            }
+            catch (error) {
+                if (!isUniqueConstraintError(error)) {
+                    throw error;
+                }
+                if (attempt === MAX_LAB_ORDER_ID_ATTEMPTS - 1) {
+                    throw new Error("Unable to generate a unique lab order ID after multiple attempts.");
+                }
+            }
+        }
+        throw new Error("Unable to generate a unique lab order ID.");
     }
     async getAll(filters = {}) {
         return lab_order_repository_1.default.findAll(filters);

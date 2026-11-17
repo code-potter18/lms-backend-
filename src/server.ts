@@ -119,6 +119,15 @@ app.use(
 );
 
 app.use(compression());
+app.use(
+  "/api/lab-report/whatsapp/webhook",
+  express.json({
+    limit: "1mb",
+    verify: (req, _res, buffer) => {
+      (req as express.Request & { rawBody?: Buffer }).rawBody = buffer;
+    },
+  }),
+);
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(cookieParser());

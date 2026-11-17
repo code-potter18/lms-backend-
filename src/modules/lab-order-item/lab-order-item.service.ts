@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import prisma from "../../config/prisma";
 import { LabOrderItemRepository } from "./lab-order-item.repository";
 import {
@@ -47,7 +48,7 @@ export class LabOrderItemService {
         }
 
         // Generate ID
-        const lab_order_item_id = `LOI${Date.now()}`;
+        const lab_order_item_id = `LOI${Date.now()}${randomUUID().replace(/-/g, "")}`;
 
         // Read price from Lab Test Master
         const price = Number(test.price ?? 0);

@@ -10,15 +10,17 @@
 // each role only needs to be listed once here regardless of casing used
 // elsewhere historically ("Admin" vs "ADMIN").
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.BRANCH_RESTRICTED_ROLES = exports.LOGIN_ENABLED_ROLES = exports.ADMIN_ROLES = exports.BRANCH_ADMIN_ROLES = exports.TOP_LEVEL_ADMIN_ROLES = exports.PATIENT = exports.STAFF = exports.RECEPTIONIST = exports.LAB_TECHNICIAN = exports.PHARMACIST = exports.NURSE = exports.DOCTOR = exports.BRANCH_ADMIN = exports.ADMIN = exports.SUPER_ADMIN = exports.HEAD_ADMIN = void 0;
+exports.BRANCH_RESTRICTED_ROLES = exports.LOGIN_ENABLED_ROLES = exports.STAFF_LOGIN_ROLES = exports.ADMIN_ROLES = exports.BRANCH_ADMIN_ROLES = exports.TOP_LEVEL_ADMIN_ROLES = exports.PATIENT = exports.STAFF = exports.RECEPTIONIST = exports.PATHOLOGIST = exports.LAB_TECHNICIAN = exports.PHARMACIST = exports.NURSE = exports.DOCTOR = exports.BRANCH_ADMIN = exports.ADMIN = exports.SYSTEM_ADMIN = exports.SUPER_ADMIN = exports.HEAD_ADMIN = void 0;
 exports.HEAD_ADMIN = "HEAD_ADMIN";
 exports.SUPER_ADMIN = "SUPER_ADMIN";
+exports.SYSTEM_ADMIN = "SYSTEM_ADMIN";
 exports.ADMIN = "ADMIN";
 exports.BRANCH_ADMIN = "BRANCH_ADMIN";
 exports.DOCTOR = "DOCTOR";
 exports.NURSE = "NURSE";
 exports.PHARMACIST = "PHARMACIST";
 exports.LAB_TECHNICIAN = "LAB_TECHNICIAN";
+exports.PATHOLOGIST = "PATHOLOGIST";
 exports.RECEPTIONIST = "RECEPTIONIST";
 exports.STAFF = "STAFF";
 exports.PATIENT = "PATIENT";
@@ -31,5 +33,18 @@ exports.TOP_LEVEL_ADMIN_ROLES = [exports.HEAD_ADMIN, exports.SUPER_ADMIN];
 // reschedule queue) without needing to escalate to a top-level admin.
 exports.BRANCH_ADMIN_ROLES = [...exports.TOP_LEVEL_ADMIN_ROLES, exports.BRANCH_ADMIN];
 exports.ADMIN_ROLES = [...exports.TOP_LEVEL_ADMIN_ROLES, exports.ADMIN];
-exports.LOGIN_ENABLED_ROLES = [...exports.TOP_LEVEL_ADMIN_ROLES, exports.BRANCH_ADMIN, exports.ADMIN, exports.DOCTOR, exports.NURSE, exports.RECEPTIONIST, exports.PHARMACIST, exports.LAB_TECHNICIAN];
+exports.STAFF_LOGIN_ROLES = [
+    ...exports.TOP_LEVEL_ADMIN_ROLES,
+    exports.SYSTEM_ADMIN,
+    exports.BRANCH_ADMIN,
+    exports.ADMIN,
+    exports.DOCTOR,
+    exports.NURSE,
+    exports.RECEPTIONIST,
+    exports.PHARMACIST,
+    exports.LAB_TECHNICIAN,
+    exports.PATHOLOGIST,
+];
+// PATIENT is intentionally limited to GET /auth/me in auth.middleware.
+exports.LOGIN_ENABLED_ROLES = [...exports.STAFF_LOGIN_ROLES];
 exports.BRANCH_RESTRICTED_ROLES = [exports.BRANCH_ADMIN, exports.ADMIN];

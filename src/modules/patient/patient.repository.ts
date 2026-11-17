@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma";
-import { GetPatientsQuery } from "./patient.types";
+import { GetPatientsQuery, PatientContactDuplicate } from "./patient.types";
 
 export class PatientRepository {
 
@@ -28,10 +28,50 @@ export class PatientRepository {
 
         return prisma.patient_bio_data.findFirst({
             where: {
-                patient_email: email
+                patient_email: {
+                    equals: email.trim(),
+                    mode: "insensitive"
+                }
             }
         });
 
+    }
+
+    async findContactDuplicates(
+        phoneVariants: string[],
+        email: string,
+        branchId?: string
+    ): Promise<PatientContactDuplicate[]> {
+        if (phoneVariants.length === 0 && !email) {
+            return [];
+        }
+
+        const primaryPhoneMatch = phoneVariants.length > 0
+            ? Prisma.sql`regexp_replace(COALESCE("patient_primary_mobile", ''), '[^0-9]', '', 'g') IN (${Prisma.join(phoneVariants)})`
+            : Prisma.sql`FALSE`;
+        const mobileMatch = primaryPhoneMatch;
+        const emailMatch = email
+            ? Prisma.sql`LOWER(BTRIM(COALESCE("patient_email", ''))) = ${email}`
+            : Prisma.sql`FALSE`;
+        const branchFilter = branchId
+            ? Prisma.sql`AND "branch_id" = ${branchId}`
+            : Prisma.empty;
+
+        return prisma.$queryRaw<PatientContactDuplicate[]>(Prisma.sql`
+            SELECT
+                "patient_id",
+                "patient_first_name",
+                "patient_middle_name",
+                "patient_last_name",
+                "patient_primary_mobile",
+                "patient_email",
+                ${mobileMatch} AS "matched_by_mobile",
+                ${emailMatch} AS "matched_by_email"
+            FROM "patient_bio_data"
+            WHERE (${mobileMatch} OR ${emailMatch})
+            ${branchFilter}
+            ORDER BY "id" DESC
+        `);
     }
 
     async findBranch(branchId: string) {

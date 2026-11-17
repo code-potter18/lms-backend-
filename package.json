@@ -6,6 +6,7 @@
   "scripts": {
     "predev": "node scripts/check-deps.js",
     "dev": "ts-node src/server.ts",
+    "dev:local-test": "node scripts/run-local-test-backend.cjs",
     "prebuild": "node scripts/check-deps.js",
     "build": "tsc",
     "start": "node dist/server.js",

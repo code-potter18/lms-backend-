@@ -18,8 +18,8 @@ const controller = new branch_controller_1.BranchController();
 // happening before this reordering).
 router.get("/assignable-admins", auth_middleware_1.authenticate, (0, authorize_1.authorizeRoles)(...roles_1.TOP_LEVEL_ADMIN_ROLES), branch_validation_1.getAssignableAdminsValidation, controller.getAssignableAdmins.bind(controller));
 // Existing routes
-router.get("/", auth_middleware_1.authenticate, controller.getAllBranches.bind(controller));
-router.get("/:branchId", auth_middleware_1.authenticate, controller.getBranchById.bind(controller));
+router.get("/", auth_middleware_1.authenticate, (0, authorize_1.authorizeRoles)(...roles_1.STAFF_LOGIN_ROLES), controller.getAllBranches.bind(controller));
+router.get("/:branchId", auth_middleware_1.authenticate, (0, authorize_1.authorizeRoles)(...roles_1.STAFF_LOGIN_ROLES), controller.getBranchById.bind(controller));
 router.post("/", auth_middleware_1.authenticate, (0, authorize_1.authorize)("branch.create"), branch_validation_1.createBranchValidation, controller.createBranch.bind(controller));
 router.put("/:branchId", auth_middleware_1.authenticate, (0, authorize_1.authorize)("branch.update"), branch_validation_1.updateBranchValidation, controller.updateBranch.bind(controller));
 router.delete("/:branchId", auth_middleware_1.authenticate, (0, authorize_1.authorize)("branch.delete"), controller.deleteBranch.bind(controller));

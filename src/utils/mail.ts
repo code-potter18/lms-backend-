@@ -52,3 +52,29 @@ export const sendOtpEmail = async (
     `,
   });
 };
+
+export const sendLabReportEmail = async (
+  to: string,
+  reportId: string,
+  pdf: Buffer,
+) => {
+  if (!isSmtpConfigured()) {
+    throw new Error(
+      "Lab report email is not configured. Set MAIL_HOST, MAIL_USER, and MAIL_PASS in the backend environment.",
+    );
+  }
+
+  return getTransporter().sendMail({
+    from: process.env.MAIL_FROM || process.env.MAIL_USER,
+    to,
+    subject: `Approved laboratory report ${reportId}`,
+    text: `Your approved laboratory report ${reportId} is attached as a PDF.`,
+    attachments: [
+      {
+        filename: `${reportId}.pdf`,
+        content: pdf,
+        contentType: "application/pdf",
+      },
+    ],
+  });
+};

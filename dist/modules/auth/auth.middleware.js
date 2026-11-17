@@ -35,7 +35,12 @@ const runAuthentication = async (req, res, next, allowQueryToken) => {
         req.user = decoded;
         // Check if role is allowed to login
         const userRole = String(req.user?.role ?? "").toLowerCase();
-        const isAllowed = roles_1.LOGIN_ENABLED_ROLES.some((r) => r.toLowerCase() === userRole);
+        const isPatientProfileRead = userRole === roles_1.PATIENT.toLowerCase() &&
+            req.method === "GET" &&
+            req.baseUrl.endsWith("/auth") &&
+            req.path === "/me";
+        const isAllowed = isPatientProfileRead ||
+            roles_1.LOGIN_ENABLED_ROLES.some((r) => r.toLowerCase() === userRole);
         if (!isAllowed) {
             return res.status(403).json({
                 success: false,

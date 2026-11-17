@@ -1,7 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createPatientHistoryValidation = exports.updatePatientValidation = exports.createPatientValidation = void 0;
+exports.createPatientHistoryValidation = exports.updatePatientEmailValidation = exports.updatePatientValidation = exports.createPatientValidation = exports.checkPatientContactDuplicatesValidation = void 0;
 const express_validator_1 = require("express-validator");
+exports.checkPatientContactDuplicatesValidation = [
+    (0, express_validator_1.body)("mobile")
+        .isString()
+        .trim()
+        .notEmpty()
+        .withMessage("Mobile number is required"),
+    (0, express_validator_1.body)("email")
+        .optional({ nullable: true, checkFalsy: true })
+        .isEmail()
+        .withMessage("Valid email is required"),
+];
 exports.createPatientValidation = [
     (0, express_validator_1.body)("username")
         .notEmpty()
@@ -16,9 +27,26 @@ exports.createPatientValidation = [
         .isMobilePhone("any")
         .withMessage("Valid mobile number is required"),
     (0, express_validator_1.body)("email")
-        .optional()
+        .if((0, express_validator_1.body)("registration_source").equals("LAB_WALK_IN"))
+        .isString()
+        .withMessage("Email is required for lab walk-in registration")
+        .bail()
+        .trim()
+        .notEmpty()
+        .withMessage("Email is required for lab walk-in registration")
+        .bail()
         .isEmail()
-        .withMessage("Valid email is required"),
+        .withMessage("Valid email is required")
+        .bail()
+        .isLength({ max: 254 })
+        .withMessage("Email must be 254 characters or fewer"),
+    (0, express_validator_1.body)("email")
+        .optional({ nullable: true, checkFalsy: true })
+        .isEmail()
+        .withMessage("Valid email is required")
+        .bail()
+        .isLength({ max: 254 })
+        .withMessage("Email must be 254 characters or fewer"),
     (0, express_validator_1.body)("branch_id")
         .notEmpty()
         .withMessage("Branch is required"),
@@ -72,7 +100,10 @@ exports.updatePatientValidation = [
     (0, express_validator_1.body)("email")
         .optional()
         .isEmail()
-        .withMessage("Valid email is required"),
+        .withMessage("Valid email is required")
+        .bail()
+        .isLength({ max: 254 })
+        .withMessage("Email must be 254 characters or fewer"),
     // Referral details — required/validated only when patient_type is "Referral"
     (0, express_validator_1.body)("referral_type")
         .if((0, express_validator_1.body)("patient_type").equals("Referral"))
@@ -111,6 +142,19 @@ exports.updatePatientValidation = [
         .bail()
         .isLength({ max: 2000 })
         .withMessage("Referral notes must not exceed 2000 characters"),
+];
+exports.updatePatientEmailValidation = [
+    (0, express_validator_1.body)("email")
+        .isString()
+        .trim()
+        .notEmpty()
+        .withMessage("Email is required")
+        .bail()
+        .isEmail()
+        .withMessage("Valid email is required")
+        .bail()
+        .isLength({ max: 254 })
+        .withMessage("Email must be 254 characters or fewer"),
 ];
 exports.createPatientHistoryValidation = [
     (0, express_validator_1.body)("patientId")

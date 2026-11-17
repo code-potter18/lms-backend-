@@ -5,6 +5,30 @@ const express_validator_1 = require("express-validator");
 const patient_service_1 = require("./patient.service");
 const service = new patient_service_1.PatientService();
 class PatientController {
+    async checkContactDuplicates(req, res) {
+        try {
+            const errors = (0, express_validator_1.validationResult)(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    message: errors.array()[0].msg,
+                    errors: errors.array()
+                });
+            }
+            const matches = await service.findContactDuplicates(String(req.body.mobile ?? ""), typeof req.body.email === "string" ? req.body.email : undefined, typeof req.query.branchId === "string" ? req.query.branchId : undefined);
+            return res.json({
+                success: true,
+                message: "Patient contact matches checked successfully",
+                data: { matches }
+            });
+        }
+        catch (error) {
+            return res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
     async createPatient(req, res) {
         try {
             const createdBy = req.user?.role || "SYSTEM";
@@ -90,6 +114,30 @@ class PatientController {
             return res.status(400).json({
                 success: false,
                 message: error.message
+            });
+        }
+    }
+    async updatePatientEmail(req, res) {
+        try {
+            const errors = (0, express_validator_1.validationResult)(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    message: errors.array()[0].msg,
+                    errors: errors.array()
+                });
+            }
+            const patient = await service.updatePatientEmail(String(req.params.patientId), String(req.body.email));
+            return res.json({
+                success: true,
+                message: "Patient email updated successfully",
+                data: patient
+            });
+        }
+        catch (error) {
+            return res.status(400).json({
+                success: false,
+                message: error instanceof Error ? error.message : "Patient email update failed"
             });
         }
     }

@@ -2147,29 +2147,107 @@ model lab_order_item {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model lab_report {
-  id                 BigInt        @id @default(autoincrement())
-  lab_report_id      String        @unique @db.VarChar(100)
-  lab_order_id       String        @db.VarChar(100)
-  report_number      String?       @unique @db.VarChar(100)
-  generated_datetime DateTime?     @default(now()) @db.Timestamp(6)
-  approved_by        String?       @db.VarChar(100)
-  approved_datetime  DateTime?     @db.Timestamp(6)
-  report_status      String?       @default("Generated") @db.VarChar(100)
-  report_file        String?
-  digital_signature  String?
-  delivered_to       String?       @db.VarChar(100)
-  delivered_datetime DateTime?     @db.Timestamp(6)
-  branch_id          String?       @db.VarChar(100)
-  user_id            String?       @db.VarChar(100)
-  created_at         DateTime?     @default(now()) @db.Timestamp(6)
-  updated_at         DateTime?     @default(now()) @db.Timestamp(6)
-  report_comment     Json?
-  lab_history        lab_history[]
-  branch             branch?       @relation(fields: [branch_id], references: [branch_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_lab_report_branch")
-  employees          employees?    @relation(fields: [approved_by], references: [employee_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_lab_report_employee")
-  lab_order          lab_order     @relation(fields: [lab_order_id], references: [lab_order_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_lab_report_order")
-  user_table         user_table?   @relation(fields: [user_id], references: [user_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_lab_report_user")
-  lab_result         lab_result[]
+  id                        BigInt                      @id @default(autoincrement())
+  lab_report_id             String                      @unique @db.VarChar(100)
+  lab_order_id              String                      @db.VarChar(100)
+  report_number             String?                     @unique @db.VarChar(100)
+  generated_datetime        DateTime?                   @default(now()) @db.Timestamp(6)
+  approved_by               String?                     @db.VarChar(100)
+  approved_datetime         DateTime?                   @db.Timestamp(6)
+  report_status             String?                     @default("Generated") @db.VarChar(100)
+  report_file               String?
+  digital_signature         String?
+  delivered_to              String?                     @db.VarChar(100)
+  delivered_datetime        DateTime?                   @db.Timestamp(6)
+  branch_id                 String?                     @db.VarChar(100)
+  user_id                   String?                     @db.VarChar(100)
+  created_at                DateTime?                   @default(now()) @db.Timestamp(6)
+  updated_at                DateTime?                   @default(now()) @db.Timestamp(6)
+  report_comment            Json?
+  lab_history               lab_history[]
+  branch                    branch?                     @relation(fields: [branch_id], references: [branch_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_lab_report_branch")
+  employees                 employees?                  @relation(fields: [approved_by], references: [employee_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_lab_report_employee")
+  lab_order                 lab_order                   @relation(fields: [lab_order_id], references: [lab_order_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_lab_report_order")
+  user_table                user_table?                 @relation(fields: [user_id], references: [user_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_lab_report_user")
+  lab_result                lab_result[]
+  whatsapp_delivery         whatsapp_delivery[]
+  lab_report_email_delivery lab_report_email_delivery[]
+}
+
+model whatsapp_patient_consent {
+  id               BigInt           @id @default(autoincrement())
+  patient_id       String           @db.VarChar(100)
+  consented        Boolean
+  consented_by     String           @db.VarChar(100)
+  consented_at     DateTime         @default(now()) @db.Timestamp(6)
+  created_at       DateTime         @default(now()) @db.Timestamp(6)
+  patient_bio_data patient_bio_data @relation(fields: [patient_id], references: [patient_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_whatsapp_consent_patient")
+
+  @@index([patient_id, created_at(sort: Desc)], map: "idx_whatsapp_consent_patient_created")
+  @@map("whatsapp_patient_consent")
+}
+
+model whatsapp_delivery {
+  id                  String                 @id @db.VarChar(30)
+  patient_id          String                 @db.VarChar(100)
+  lab_report_id       String                 @db.VarChar(100)
+  phone_number        String                 @db.VarChar(16)
+  whatsapp_message_id String?                @unique(map: "uq_whatsapp_delivery_message") @db.VarChar(100)
+  media_id            String?                @db.VarChar(100)
+  status              WhatsappDeliveryStatus @default(PENDING)
+  error_message       String?                @db.VarChar(500)
+  sent_at             DateTime?              @db.Timestamp(6)
+  delivered_at        DateTime?              @db.Timestamp(6)
+  read_at             DateTime?              @db.Timestamp(6)
+  failed_at           DateTime?              @db.Timestamp(6)
+  created_by          String                 @db.VarChar(100)
+  created_at          DateTime               @default(now()) @db.Timestamp(6)
+  updated_at          DateTime               @db.Timestamp(6)
+  patient_bio_data    patient_bio_data       @relation(fields: [patient_id], references: [patient_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_whatsapp_delivery_patient")
+  lab_report          lab_report             @relation(fields: [lab_report_id], references: [lab_report_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_whatsapp_delivery_report")
+
+  @@unique([lab_report_id, phone_number], map: "uq_whatsapp_delivery_active_report_phone", where: raw("\"status\" IN ('PENDING', 'PROCESSING', 'SENT', 'DELIVERED', 'READ')"))
+  @@index([patient_id, created_at(sort: Desc)], map: "idx_whatsapp_delivery_patient_created")
+  @@index([lab_report_id, created_at(sort: Desc)], map: "idx_whatsapp_delivery_report_created")
+  @@index([status, created_at], map: "idx_whatsapp_delivery_status_created")
+  @@map("whatsapp_delivery")
+}
+
+model patient_email_consent {
+  id               BigInt           @id @default(autoincrement())
+  patient_id       String           @db.VarChar(100)
+  email_address    String           @db.VarChar(255)
+  consented        Boolean
+  consented_by     String           @db.VarChar(100)
+  consented_at     DateTime         @default(now()) @db.Timestamp(6)
+  created_at       DateTime         @default(now()) @db.Timestamp(6)
+  patient_bio_data patient_bio_data @relation(fields: [patient_id], references: [patient_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_patient_email_consent_patient")
+
+  @@index([patient_id, created_at(sort: Desc)], map: "idx_patient_email_consent_patient_created")
+  @@map("patient_email_consent")
+}
+
+model lab_report_email_delivery {
+  id               String              @id @db.VarChar(36)
+  patient_id       String              @db.VarChar(100)
+  lab_report_id    String              @db.VarChar(100)
+  email_address    String              @db.VarChar(255)
+  message_id       String?             @db.VarChar(255)
+  status           EmailDeliveryStatus @default(PENDING)
+  error_message    String?             @db.VarChar(500)
+  sent_at          DateTime?           @db.Timestamp(6)
+  failed_at        DateTime?           @db.Timestamp(6)
+  created_by       String              @db.VarChar(100)
+  created_at       DateTime            @default(now()) @db.Timestamp(6)
+  updated_at       DateTime            @db.Timestamp(6)
+  patient_bio_data patient_bio_data    @relation(fields: [patient_id], references: [patient_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_lab_report_email_delivery_patient")
+  lab_report       lab_report          @relation(fields: [lab_report_id], references: [lab_report_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_lab_report_email_delivery_report")
+
+  @@unique([lab_report_id], map: "uq_lab_report_email_delivery_active", where: raw("\"status\" IN ('PENDING', 'PROCESSING', 'SENT', 'UNKNOWN')"))
+  @@index([patient_id, created_at(sort: Desc)], map: "idx_lab_report_email_delivery_patient_created")
+  @@index([lab_report_id, created_at(sort: Desc)], map: "idx_lab_report_email_delivery_report_created")
+  @@index([status, created_at], map: "idx_lab_report_email_delivery_status_created")
+  @@map("lab_report_email_delivery")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -2548,7 +2626,7 @@ model patient_bio_data {
   patient_blood_group            String?                        @db.VarChar(100)
   patient_primary_mobile         String?                        @db.VarChar(100)
   patient_alternate_mobile       String?                        @db.VarChar(100)
-  patient_email                  String?                        @db.VarChar(100)
+  patient_email                  String?                        @db.VarChar(255)
   patient_marital_status         String?                        @db.VarChar(100)
   patient_nationality            String?                        @db.VarChar(100)
   patient_photo_url              String?
@@ -2579,6 +2657,10 @@ model patient_bio_data {
   patient_allergy                patient_allergy[]
   branch                         branch?                        @relation(fields: [branch_id], references: [branch_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_patient_bio_branch")
   user_table                     user_table?                    @relation(fields: [user_id], references: [user_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_patient_bio_user")
+  whatsapp_patient_consent       whatsapp_patient_consent[]
+  whatsapp_delivery              whatsapp_delivery[]
+  patient_email_consent          patient_email_consent[]
+  lab_report_email_delivery      lab_report_email_delivery[]
   patient_comorbidity            patient_comorbidity[]
   patient_history                patient_history[]
   patient_investigation_result   patient_investigation_result[]
@@ -3234,6 +3316,23 @@ enum LeaveStatus {
   APPROVED
   REJECTED
   CANCELLED
+}
+
+enum WhatsappDeliveryStatus {
+  PENDING
+  PROCESSING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum EmailDeliveryStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  UNKNOWN
 }
 
 enum doctor_schedule_change_mode {

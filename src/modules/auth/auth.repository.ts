@@ -23,7 +23,11 @@ export class AuthRepository {
             branch: true,
           },
         },
-        patient_bio_data: true,
+        patient_bio_data: {
+          include: {
+            branch: true,
+          },
+        },
         user_branch_mapping: {
           where: { status: 1 },
           include: {

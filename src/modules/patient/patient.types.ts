@@ -106,3 +106,14 @@ export interface GetPatientsQuery {
     page?: number;
     limit?: number;
 }
+
+export interface PatientContactDuplicate {
+    patient_id: string;
+    patient_first_name: string;
+    patient_middle_name: string | null;
+    patient_last_name: string | null;
+    patient_primary_mobile: string | null;
+    patient_email: string | null;
+    matched_by_mobile: boolean;
+    matched_by_email: boolean;
+}

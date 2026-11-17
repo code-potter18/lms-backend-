@@ -4,14 +4,25 @@ import { authenticate } from "../auth/auth.middleware";
 import { authorize } from "../../middleware/authorize";
 import { branchScope } from "../../middleware/branchScope";
 import {
+    checkPatientContactDuplicatesValidation,
     createPatientValidation,
     updatePatientValidation,
+    updatePatientEmailValidation,
     createPatientHistoryValidation
 } from "./patient.validation";
 
 const router = Router();
 
 const controller = new PatientController();
+
+router.post(
+    "/check-duplicates",
+    authenticate,
+    authorize("patient.read"),
+    branchScope,
+    checkPatientContactDuplicatesValidation,
+    controller.checkContactDuplicates.bind(controller)
+);
 
 router.post(
     "/create",
@@ -28,6 +39,14 @@ router.get(
     authenticate,
     authorize("patient.read"),
     controller.getPatientById.bind(controller)
+);
+
+router.put(
+    "/:patientId/email",
+    authenticate,
+    authorize("patient.update"),
+    updatePatientEmailValidation,
+    controller.updatePatientEmail.bind(controller)
 );
 
 router.put(

@@ -8,22 +8,23 @@ const bcrypt_1 = __importDefault(require("bcrypt"));
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const patient_repository_1 = require("./patient.repository");
 const idGenerator_1 = require("../../utils/idGenerator");
+const patient_contact_utils_1 = require("./patient-contact.utils");
 const repository = new patient_repository_1.PatientRepository();
 class PatientService {
+    async findContactDuplicates(mobile, email, branchId) {
+        return repository.findContactDuplicates((0, patient_contact_utils_1.phoneMatchVariants)(mobile), email?.trim().toLowerCase() ?? "", branchId);
+    }
     async createPatient(data, createdBy) {
         const username = await repository.findUsername(data.username);
         if (username) {
             throw new Error("Username already exists");
         }
-        if (data.email) {
-            const email = await repository.findEmail(data.email);
-            if (email) {
-                throw new Error("Email already exists");
-            }
-        }
-        const mobile = await repository.findMobile(data.mobile);
-        if (mobile) {
+        const contactDuplicates = await this.findContactDuplicates(data.mobile, data.email);
+        if (contactDuplicates.some((match) => match.matched_by_mobile)) {
             throw new Error("Mobile already exists");
+        }
+        if (contactDuplicates.some((match) => match.matched_by_email)) {
+            throw new Error("Email already exists");
         }
         const branch = await repository.findBranch(data.branch_id);
         if (!branch) {
@@ -132,9 +133,13 @@ class PatientService {
         if (!existing) {
             throw new Error("Patient not found");
         }
-        if (data.email &&
-            data.email !== existing.patient_email) {
-            const email = await repository.findEmail(data.email);
+        const requestedEmail = data.email?.trim();
+        const existingEmail = existing.patient_email?.trim();
+        if (existingEmail && requestedEmail !== undefined && requestedEmail.toLowerCase() !== existingEmail.toLowerCase()) {
+            throw new Error("An existing patient email cannot be overwritten.");
+        }
+        if (requestedEmail && requestedEmail.toLowerCase() !== existingEmail?.toLowerCase()) {
+            const email = await repository.findEmail(requestedEmail);
             if (email) {
                 throw new Error("Email already exists");
             }
@@ -221,6 +226,21 @@ class PatientService {
                 }
                 : undefined
         });
+    }
+    async updatePatientEmail(patientId, emailAddress) {
+        const existing = await repository.getPatientById(patientId);
+        if (!existing) {
+            throw new Error("Patient not found");
+        }
+        if (existing.patient_email?.trim()) {
+            throw new Error("This patient's registered email is already set and cannot be overwritten here.");
+        }
+        const email = emailAddress.trim();
+        const duplicate = await repository.findEmail(email);
+        if (duplicate) {
+            throw new Error("Email already exists");
+        }
+        return repository.updatePatient(patientId, { patient_email: email });
     }
     async createPatientHistory(data, createdBy) {
         const hasAnyVital = data.systolicBp !== undefined ||

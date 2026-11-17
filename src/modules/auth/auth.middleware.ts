@@ -1,6 +1,6 @@
 import { Request, RequestHandler } from "express";
 import jwt from "jsonwebtoken";
-import { LOGIN_ENABLED_ROLES } from "../../permissions/roles";
+import { LOGIN_ENABLED_ROLES, PATIENT } from "../../permissions/roles";
 import prisma from "../../config/prisma";
 
 export type AuthRequest = Request & {
@@ -57,7 +57,14 @@ const runAuthentication = async (
 
     // Check if role is allowed to login
     const userRole = String(req.user?.role ?? "").toLowerCase();
-    const isAllowed = LOGIN_ENABLED_ROLES.some((r) => r.toLowerCase() === userRole);
+    const isPatientProfileRead =
+      userRole === PATIENT.toLowerCase() &&
+      req.method === "GET" &&
+      req.baseUrl.endsWith("/auth") &&
+      req.path === "/me";
+    const isAllowed =
+      isPatientProfileRead ||
+      LOGIN_ENABLED_ROLES.some((r) => r.toLowerCase() === userRole);
 
     if (!isAllowed) {
       return res.status(403).json({

@@ -17,6 +17,13 @@ class AuthService {
     assertAccountUsable(user) {
         const role = user.role_type;
         const employee = user.employees;
+        // Patients have patient profiles, not employee profiles.
+        if (role?.toUpperCase() === "PATIENT") {
+            if (!user.patient_bio_data || user.patient_bio_data.length === 0) {
+                throw new Error("Patient profile not found. Please contact the administrator.");
+            }
+            return;
+        }
         const isTopLevelAdmin = roles_1.TOP_LEVEL_ADMIN_ROLES.some((r) => r.toLowerCase() === String(role ?? "").toLowerCase());
         if (!isTopLevelAdmin) {
             if (!employee) {
@@ -43,16 +50,23 @@ class AuthService {
         // is the authoritative record of which branch this user is on. For
         // DOCTORs the mapping is the ONLY source of branch truth -
         // employees.branch_id/user_table.branch_id are denormalized copies that
-        // can drift out of sync and are deliberately ignored. Other roles may
-        // fall back to those columns when there's no active mapping at all.
+        // can drift out of sync and are deliberately ignored. Patients use their
+        // own profile's branch; other employee roles may fall back to denormalized
+        // branch columns when there's no active mapping.
         const primaryMapping = user.user_branch_mapping?.[0];
-        const isDoctor = user.role_type === "DOCTOR";
+        const patient = user.patient_bio_data?.[0];
+        const roleType = String(user.role_type ?? "").toUpperCase();
+        const isDoctor = roleType === "DOCTOR";
         const primaryBranch = isDoctor
             ? primaryMapping?.branch ?? null
-            : primaryMapping?.branch || employee?.branch || user.branch || null;
+            : roleType === "PATIENT"
+                ? patient?.branch || primaryMapping?.branch || user.branch || null
+                : primaryMapping?.branch || employee?.branch || user.branch || null;
         const primaryBranchId = isDoctor
             ? primaryMapping?.branch_id ?? null
-            : primaryMapping?.branch_id || employee?.branch_id || user.branch_id || null;
+            : roleType === "PATIENT"
+                ? patient?.branch_id || primaryMapping?.branch_id || user.branch_id || null
+                : primaryMapping?.branch_id || employee?.branch_id || user.branch_id || null;
         const token = (0, jwt_1.generateToken)({
             username: user.username,
             role: user.role_type,
@@ -67,6 +81,7 @@ class AuthService {
                 username: user.username,
                 role: user.role_type,
                 role_type: user.role_type,
+                patient_id: patient?.patient_id ?? null,
                 employee_id: employee?.employee_id ?? null,
                 hospital_id: primaryBranch?.hospital_id,
                 branch_id: primaryBranchId,

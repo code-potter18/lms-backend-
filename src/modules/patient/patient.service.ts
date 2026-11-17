@@ -5,14 +5,28 @@ import { PatientRepository } from "./patient.repository";
 import {
     CreatePatientRequest,
     UpdatePatientRequest,
-    GetPatientsQuery
+    GetPatientsQuery,
+    PatientContactDuplicate
 } from "./patient.types";
 import { CreatePatientHistoryDTO } from "./patient-history.types";
 import { generateId } from "../../utils/idGenerator";
+import { phoneMatchVariants } from "./patient-contact.utils";
 
 const repository = new PatientRepository();
 
 export class PatientService {
+
+    async findContactDuplicates(
+        mobile: string,
+        email?: string,
+        branchId?: string
+    ): Promise<PatientContactDuplicate[]> {
+        return repository.findContactDuplicates(
+            phoneMatchVariants(mobile),
+            email?.trim().toLowerCase() ?? "",
+            branchId
+        );
+    }
 
     async createPatient(data: CreatePatientRequest,createdBy: string) {
 
@@ -22,20 +36,12 @@ export class PatientService {
             throw new Error("Username already exists");
         }
 
-        if (data.email) {
-
-            const email = await repository.findEmail(data.email);
-
-            if (email) {
-                throw new Error("Email already exists");
-            }
-
-        }
-
-        const mobile = await repository.findMobile(data.mobile);
-
-        if (mobile) {
+        const contactDuplicates = await this.findContactDuplicates(data.mobile, data.email);
+        if (contactDuplicates.some((match) => match.matched_by_mobile)) {
             throw new Error("Mobile already exists");
+        }
+        if (contactDuplicates.some((match) => match.matched_by_email)) {
+            throw new Error("Email already exists");
         }
 
         const branch = await repository.findBranch(data.branch_id);
@@ -209,12 +215,15 @@ export class PatientService {
             throw new Error("Patient not found");
         }
 
-        if (
-            data.email &&
-            data.email !== existing.patient_email
-        ) {
+        const requestedEmail = data.email?.trim();
+        const existingEmail = existing.patient_email?.trim();
+        if (existingEmail && requestedEmail !== undefined && requestedEmail.toLowerCase() !== existingEmail.toLowerCase()) {
+            throw new Error("An existing patient email cannot be overwritten.");
+        }
 
-            const email = await repository.findEmail(data.email);
+        if (requestedEmail && requestedEmail.toLowerCase() !== existingEmail?.toLowerCase()) {
+
+            const email = await repository.findEmail(requestedEmail);
 
             if (email) {
                 throw new Error("Email already exists");
@@ -333,6 +342,24 @@ export class PatientService {
 
         });
 
+    }
+
+    async updatePatientEmail(patientId: string, emailAddress: string) {
+        const existing = await repository.getPatientById(patientId);
+        if (!existing) {
+            throw new Error("Patient not found");
+        }
+        if (existing.patient_email?.trim()) {
+            throw new Error("This patient's registered email is already set and cannot be overwritten here.");
+        }
+
+        const email = emailAddress.trim();
+        const duplicate = await repository.findEmail(email);
+        if (duplicate) {
+            throw new Error("Email already exists");
+        }
+
+        return repository.updatePatient(patientId, { patient_email: email });
     }
 
     async createPatientHistory(data: CreatePatientHistoryDTO, createdBy: string) {

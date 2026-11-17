@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendOtpEmail = void 0;
+exports.sendLabReportEmail = exports.sendOtpEmail = void 0;
 const nodemailer = __importStar(require("nodemailer"));
 let transporter = null;
 const isSmtpConfigured = () => Boolean(process.env.MAIL_HOST && process.env.MAIL_USER && process.env.MAIL_PASS);
@@ -77,3 +77,22 @@ const sendOtpEmail = async (to, otp) => {
     });
 };
 exports.sendOtpEmail = sendOtpEmail;
+const sendLabReportEmail = async (to, reportId, pdf) => {
+    if (!isSmtpConfigured()) {
+        throw new Error("Lab report email is not configured. Set MAIL_HOST, MAIL_USER, and MAIL_PASS in the backend environment.");
+    }
+    return getTransporter().sendMail({
+        from: process.env.MAIL_FROM || process.env.MAIL_USER,
+        to,
+        subject: `Approved laboratory report ${reportId}`,
+        text: `Your approved laboratory report ${reportId} is attached as a PDF.`,
+        attachments: [
+            {
+                filename: `${reportId}.pdf`,
+                content: pdf,
+                contentType: "application/pdf",
+            },
+        ],
+    });
+};
+exports.sendLabReportEmail = sendLabReportEmail;
