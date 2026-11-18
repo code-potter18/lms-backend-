@@ -13,10 +13,21 @@ type ReportWithPatient = {
   lab_order: {
     patient_history: {
       patient_id: string;
-      patient_bio_data: { patient_email: string | null } | null;
+      patient_bio_data: {
+        patient_email: string | null;
+        patient_first_name: string | null;
+        patient_middle_name: string | null;
+        patient_last_name: string | null;
+      } | null;
     } | null;
   };
 };
+
+/* A PROCESSING row older than this cannot still be sending - the process that
+   owned it is gone. It is moved to FAILED so the delivery can be retried
+   instead of blocking the report forever. */
+const STALE_ATTEMPT_MS = 15 * 60 * 1000;
+const isEmailMigrationMissing = (error: any) => error?.code === "P2021" || error?.code === "42P01";
 
 const getReport = async (reportId: string): Promise<ReportWithPatient> => {
   const report = await prisma.lab_report.findUnique({
@@ -33,7 +44,14 @@ const getReport = async (reportId: string): Promise<ReportWithPatient> => {
           patient_history: {
             select: {
               patient_id: true,
-              patient_bio_data: { select: { patient_email: true } },
+              patient_bio_data: {
+                select: {
+                  patient_email: true,
+                  patient_first_name: true,
+                  patient_middle_name: true,
+                  patient_last_name: true,
+                },
+              },
             },
           },
         },
@@ -52,6 +70,16 @@ const emailAddressFor = (report: ReportWithPatient) => {
     throw new Error("This patient has no valid registered email. An authorized user must add one before delivery.");
   }
   return { patientId: patient.patient_id, email };
+};
+
+const patientNameFor = (report: ReportWithPatient) => {
+  const patient = report.lab_order.patient_history?.patient_bio_data;
+  if (!patient) return "Patient";
+  const name = [patient.patient_first_name, patient.patient_middle_name, patient.patient_last_name]
+    .map((part) => (typeof part === "string" ? part.trim() : ""))
+    .filter(Boolean)
+    .join(" ");
+  return name || "Patient";
 };
 
 const ensureApprovedReport = (report: ReportWithPatient) => {
@@ -75,13 +103,35 @@ const ensureApprovedReport = (report: ReportWithPatient) => {
 const decodePdf = (reportFile: string | null): Buffer => {
   if (!reportFile) throw new Error("The saved PDF for this report is unavailable.");
   const pdf = Buffer.from(
-    reportFile.replace(/^data:application\/pdf;base64,/i, "").trim(),
+    reportFile.replace(/^data:application\/pdf(;[^;]*)?;base64,/i, "").trim(),
     "base64",
   );
   if (pdf.length < 5 || pdf.subarray(0, 5).toString("ascii") !== "%PDF-") {
     throw new Error("The saved report file is not a valid PDF.");
   }
   return pdf;
+};
+
+/* Marks an abandoned PROCESSING attempt as FAILED so retry becomes possible.
+   Never touches a live attempt (younger than STALE_ATTEMPT_MS). */
+const recoverStaleAttempt = async (reportId: string) => {
+  const latest = await prisma.lab_report_email_delivery.findFirst({
+    where: { lab_report_id: reportId },
+    orderBy: [{ created_at: "desc" }, { id: "desc" }],
+  });
+  if (latest?.status !== EmailDeliveryStatus.PROCESSING) return;
+  if (Date.now() - latest.updated_at.getTime() < STALE_ATTEMPT_MS) return;
+
+  const now = new Date();
+  await prisma.lab_report_email_delivery.update({
+    where: { id: latest.id },
+    data: {
+      status: EmailDeliveryStatus.FAILED,
+      error_message: "The previous send attempt did not complete and was marked failed.",
+      failed_at: now,
+      updated_at: now,
+    },
+  });
 };
 
 const statusResponse = (
@@ -124,18 +174,34 @@ export class LabReportEmailService {
     const report = await getReport(reportId);
     const patientId = report.lab_order.patient_history?.patient_id;
     if (!patientId) throw new Error("The saved report is not linked to a patient.");
+
     const email = report.lab_order.patient_history?.patient_bio_data?.patient_email?.trim() || null;
-    const [consent, delivery] = await Promise.all([
-      email ? prisma.patient_email_consent.findFirst({
-        where: { patient_id: patientId, email_address: { equals: email, mode: "insensitive" } },
-        orderBy: [{ created_at: "desc" }, { id: "desc" }],
-        select: { consented: true },
-      }) : Promise.resolve(null),
-      prisma.lab_report_email_delivery.findFirst({
-        where: { lab_report_id: report.lab_report_id },
-        orderBy: [{ created_at: "desc" }, { id: "desc" }],
-      }),
-    ]);
+    let consent = null;
+    let delivery = null;
+    try {
+      await recoverStaleAttempt(reportId);
+      [consent, delivery] = await Promise.all([
+        email ? prisma.patient_email_consent.findFirst({
+          where: { patient_id: patientId, email_address: { equals: email, mode: "insensitive" } },
+          orderBy: [{ created_at: "desc" }, { id: "desc" }],
+          select: { consented: true },
+        }) : Promise.resolve(null),
+        prisma.lab_report_email_delivery.findFirst({
+          where: { lab_report_id: report.lab_report_id },
+          orderBy: [{ created_at: "desc" }, { id: "desc" }],
+        }),
+      ]);
+    } catch (error: any) {
+      if (!isEmailMigrationMissing(error)) throw error;
+      return {
+        ...statusResponse(null, patientId),
+        emailAddress: email,
+        configured: false,
+        configurationMessage: "Email delivery history and consent storage are unavailable until the approved email migration is applied.",
+        consented: false,
+        recipientError: email ? null : "No registered email is available. An authorized user must add one before delivery.",
+      };
+    }
     return {
       ...statusResponse(delivery, patientId),
       emailAddress: email,
@@ -144,6 +210,8 @@ export class LabReportEmailService {
     };
   }
 
+  /* Manual send/retry from the Report Transfer screen. The operator confirms
+     the patient consented, so that attestation is recorded. */
   async sendReport(reportId: string, consentConfirmed: boolean, actorId: string) {
     if (!consentConfirmed) {
       throw new Error("Confirm that the patient has consented to receive this report by email.");
@@ -156,6 +224,19 @@ export class LabReportEmailService {
     ensureApprovedReport(report);
     const { patientId, email } = emailAddressFor(report);
     const pdf = decodePdf(report.report_file);
+
+    return this.deliver(report, patientId, email, pdf, actorId, true);
+  }
+
+  private async deliver(
+    report: ReportWithPatient,
+    patientId: string,
+    email: string,
+    pdf: Buffer,
+    actorId: string,
+    recordConsent: boolean,
+  ) {
+    await recoverStaleAttempt(report.lab_report_id);
 
     let delivery;
     try {
@@ -171,14 +252,16 @@ export class LabReportEmailService {
             updated_at: new Date(),
           },
         });
-        await transaction.patient_email_consent.create({
-          data: {
-            patient_id: patientId,
-            email_address: email,
-            consented: true,
-            consented_by: actorId,
-          },
-        });
+        if (recordConsent) {
+          await transaction.patient_email_consent.create({
+            data: {
+              patient_id: patientId,
+              email_address: email,
+              consented: true,
+              consented_by: actorId,
+            },
+          });
+        }
         return transaction.lab_report_email_delivery.update({
           where: { id: created.id },
           data: { status: EmailDeliveryStatus.PROCESSING, updated_at: new Date() },
@@ -194,14 +277,18 @@ export class LabReportEmailService {
         const existing = await prisma.lab_report_email_delivery.findFirst({
           where: {
             lab_report_id: report.lab_report_id,
-            status: { in: [EmailDeliveryStatus.PENDING, EmailDeliveryStatus.PROCESSING, EmailDeliveryStatus.SENT, EmailDeliveryStatus.UNKNOWN] },
+            status: {
+              in: [
+                EmailDeliveryStatus.PENDING,
+                EmailDeliveryStatus.PROCESSING,
+                EmailDeliveryStatus.SENT,
+                EmailDeliveryStatus.UNKNOWN,
+              ],
+            },
           },
           orderBy: [{ created_at: "desc" }, { id: "desc" }],
         });
         if (existing) {
-          if (existing.status === EmailDeliveryStatus.FAILED) {
-            throw new Error("Delivery failed; use retry to create a new send attempt.");
-          }
           throw new Error(
             existing.status === EmailDeliveryStatus.SENT
               ? "This report has already been sent to the registered email."
@@ -214,8 +301,15 @@ export class LabReportEmailService {
       throw error;
     }
 
+    const tracker = { messageDataStarted: false };
     try {
-      const result = await sendLabReportEmail(email, report.lab_report_id, pdf);
+      const result = await sendLabReportEmail(
+        email,
+        report.lab_report_id,
+        pdf,
+        patientNameFor(report),
+        tracker,
+      );
       if (!(result.accepted ?? []).some((recipient) => recipient.toLowerCase() === email.toLowerCase())) {
         const reason = "The SMTP server did not accept the patient's email address.";
         const failedAt = new Date();
@@ -252,7 +346,18 @@ export class LabReportEmailService {
         typeof error === "object" && error !== null && "responseCode" in error
           ? Number(error.responseCode)
           : null;
-      const outcomeUnknown = !smtpResponseCode;
+      /* A server rejection (responseCode) or a failure before the server
+         answered 354 to DATA is a clean FAILED: nothing reached the patient, so
+         a retry is safe. Once the message body was being transmitted a broken
+         connection leaves the outcome genuinely unknown - resending could
+         duplicate the email. `command === "DATA"` covers nodemailer builds
+         that report the phase directly. */
+      const command =
+        typeof error === "object" && error !== null && "command" in error
+          ? String((error as { command?: unknown }).command ?? "").toUpperCase()
+          : "";
+      const outcomeUnknown =
+        !smtpResponseCode && (command === "DATA" || tracker.messageDataStarted);
       const failedAt = new Date();
       await prisma.lab_report_email_delivery.update({
         where: { id: delivery.id },

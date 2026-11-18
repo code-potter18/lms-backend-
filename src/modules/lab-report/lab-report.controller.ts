@@ -137,11 +137,18 @@ export class LabReportController {
     const authUser = (req as AuthRequest).user;
     const role = String(authUser?.role ?? "").toUpperCase();
     if (
-      !["DOCTOR", "HEAD_ADMIN", "SUPER_ADMIN", "BRANCH_ADMIN", "ADMIN"].includes(
-        role,
-      )
+      ![
+        "DOCTOR",
+        "HEAD_ADMIN",
+        "SUPER_ADMIN",
+        "BRANCH_ADMIN",
+        "ADMIN",
+        "LAB_TECHNICIAN",
+      ].includes(role)
     ) {
-      throw new Error("Only an authorized clinician or administrator can approve a report");
+      throw new Error(
+        "Only an authorized clinician, administrator, or lab technician can approve a report",
+      );
     }
     if (typeof authUser?.user_id !== "string") {
       throw new Error("The authenticated user cannot be linked to an employee record");
@@ -173,6 +180,19 @@ export class LabReportController {
       return res.status(500).json({
         success: false,
         message: error.message,
+      });
+    }
+  }
+
+  async getTransferQueue(req: Request, res: Response) {
+    try {
+      const branchId = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+      const queue = await service.getTransferQueue(branchId);
+      return res.json({ success: true, data: queue });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Could not load approved report transfer queue.",
       });
     }
   }

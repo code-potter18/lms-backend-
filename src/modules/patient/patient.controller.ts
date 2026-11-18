@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { validationResult } from "express-validator";
 import { PatientService } from "./patient.service";
+import { AuthRequest } from "../auth/auth.middleware";
 
 const service = new PatientService();
 
@@ -175,6 +176,13 @@ export class PatientController {
 
     async updatePatientEmail(req: Request, res: Response) {
         try {
+            const actorId = (req as AuthRequest).user?.user_id;
+            if (typeof actorId !== "string") {
+                return res.status(401).json({
+                    success: false,
+                    message: "The authenticated user cannot be recorded for email consent.",
+                });
+            }
             const errors = validationResult(req);
             if (!errors.isEmpty()) {
                 return res.status(400).json({
@@ -186,7 +194,8 @@ export class PatientController {
 
             const patient = await service.updatePatientEmail(
                 String(req.params.patientId),
-                String(req.body.email)
+                String(req.body.email),
+                actorId
             );
             return res.json({
                 success: true,

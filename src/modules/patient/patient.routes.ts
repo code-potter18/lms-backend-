@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { PatientController } from "./patient.controller";
 import { authenticate } from "../auth/auth.middleware";
-import { authorize } from "../../middleware/authorize";
+import { authorize, authorizeAny } from "../../middleware/authorize";
 import { branchScope } from "../../middleware/branchScope";
 import {
     checkPatientContactDuplicatesValidation,
@@ -44,7 +44,7 @@ router.get(
 router.put(
     "/:patientId/email",
     authenticate,
-    authorize("patient.update"),
+    authorizeAny("patient.update", "patient.email.update"),
     updatePatientEmailValidation,
     controller.updatePatientEmail.bind(controller)
 );

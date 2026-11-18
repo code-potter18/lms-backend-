@@ -37,6 +37,10 @@ export class LabReportService {
     return repository.findAll();
   }
 
+  async getTransferQueue(branchId?: string) {
+    return repository.findTransferQueue(branchId);
+  }
+
   async getById(id: string) {
     const report = await repository.findById(id);
     if (!report) {
@@ -72,7 +76,7 @@ export class LabReportService {
         report_status: data.report_status || "Generated",
         report_file: data.report_file,
         digital_signature: data.digital_signature,
-        approved_datetime: data.approved_datetime || new Date(),
+        approved_datetime: data.approved_datetime ?? undefined,
         approved_by: data.approved_by,
         parameters: data.parameters,
         clinical_correlation: data.clinical_correlation,
@@ -105,10 +109,14 @@ export class LabReportService {
 
     // 3. Validate branch_id safely
     let validBranchId: string | null = null;
-    if (data.branch_id) {
+    const requestedBranchId = data.branch_id ?? (await prisma.lab_order.findUnique({
+      where: { lab_order_id: data.lab_order_id },
+      select: { branch_id: true },
+    }))?.branch_id ?? null;
+    if (requestedBranchId) {
       try {
         const b = await prisma.branch.findUnique({
-          where: { branch_id: data.branch_id },
+          where: { branch_id: requestedBranchId },
         });
         if (b) {
           validBranchId = b.branch_id;
@@ -154,7 +162,7 @@ export class LabReportService {
       approved_by: validApprovedBy,
       approved_datetime: data.approved_datetime
         ? new Date(data.approved_datetime)
-        : new Date(),
+        : null,
       report_status: data.report_status || "Generated",
       report_file: data.report_file || null,
       digital_signature: data.digital_signature || null,

@@ -344,22 +344,46 @@ export class PatientService {
 
     }
 
-    async updatePatientEmail(patientId: string, emailAddress: string) {
+    async updatePatientEmail(patientId: string, emailAddress: string, actorId: string) {
         const existing = await repository.getPatientById(patientId);
         if (!existing) {
             throw new Error("Patient not found");
         }
-        if (existing.patient_email?.trim()) {
-            throw new Error("This patient's registered email is already set and cannot be overwritten here.");
+        if (!actorId || actorId.length > 100) {
+            throw new Error("The authenticated user cannot be recorded for email consent.");
         }
 
         const email = emailAddress.trim();
+
+        /* Lab staff may correct the registered email from Report Transfer, so an
+           already-set address on the SAME patient can be replaced. The update is
+           always an UPDATE of the existing patient row - never a second patient. */
         const duplicate = await repository.findEmail(email);
-        if (duplicate) {
+        if (duplicate && duplicate.patient_id !== patientId) {
             throw new Error("Email already exists");
         }
 
-        return repository.updatePatient(patientId, { patient_email: email });
+        if (existing.patient_email?.trim().toLowerCase() === email.toLowerCase()) {
+            return existing;
+        }
+
+        /* Saving a corrected destination invalidates any prior consent for that
+           address. A fresh Report Transfer attestation is required before send. */
+        return prisma.$transaction(async (transaction) => {
+            const patient = await transaction.patient_bio_data.update({
+                where: { patient_id: patientId },
+                data: { patient_email: email },
+            });
+            await transaction.patient_email_consent.create({
+                data: {
+                    patient_id: patientId,
+                    email_address: email,
+                    consented: false,
+                    consented_by: actorId,
+                },
+            });
+            return patient;
+        });
     }
 
     async createPatientHistory(data: CreatePatientHistoryDTO, createdBy: string) {

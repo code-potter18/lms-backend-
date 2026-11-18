@@ -53,10 +53,67 @@ export const sendOtpEmail = async (
   });
 };
 
+const escapeHtml = (value: string) =>
+  value.replace(/[&<>"']/g, (character) => {
+    switch (character) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
+  });
+
+export type LabReportSendTracker = {
+  /* Set as soon as the SMTP server answers 354 to DATA, i.e. the point from
+     which the message body may already have reached the recipient. */
+  messageDataStarted: boolean;
+};
+
+/* A dedicated transport is used for lab reports so the SMTP dialogue can be
+   inspected: a connection lost after 354 has an undetermined outcome, while
+   a failure before it is safely retryable. The custom logger swallows the
+   protocol output instead of printing it. */
+const createTrackedTransporter = (tracker: LabReportSendTracker) =>
+  nodemailer.createTransport({
+    host: process.env.MAIL_HOST,
+    port: Number(process.env.MAIL_PORT) || 587,
+    secure: Number(process.env.MAIL_PORT) === 465,
+    auth: {
+      user: process.env.MAIL_USER,
+      pass: process.env.MAIL_PASS,
+    },
+    debug: true,
+    logger: {
+      debug: (...args: unknown[]) => {
+        const [entry, message] = args;
+        if (
+          entry &&
+          typeof entry === "object" &&
+          (entry as { tnx?: string }).tnx === "server" &&
+          typeof message === "string" &&
+          /^354\b/.test(message)
+        ) {
+          tracker.messageDataStarted = true;
+        }
+      },
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+    },
+  });
+
 export const sendLabReportEmail = async (
   to: string,
   reportId: string,
   pdf: Buffer,
+  patientName?: string,
+  tracker?: LabReportSendTracker,
 ) => {
   if (!isSmtpConfigured()) {
     throw new Error(
@@ -64,14 +121,33 @@ export const sendLabReportEmail = async (
     );
   }
 
-  return getTransporter().sendMail({
+  const name = patientName?.trim() || "Patient";
+  const greeting = name === "Patient" ? "Dear Patient," : `Dear ${name},`;
+  const body =
+    "Your laboratory test report is ready.\n\n" +
+    "Please find your laboratory report attached to this email.\n\n" +
+    "For any clarification regarding your report, please contact the hospital laboratory department.\n\n" +
+    "Thank you for choosing our services.\n\n" +
+    "Regards,\nHMS Laboratory Department";
+
+  return (tracker ? createTrackedTransporter(tracker) : getTransporter()).sendMail({
     from: process.env.MAIL_FROM || process.env.MAIL_USER,
     to,
-    subject: `Approved laboratory report ${reportId}`,
-    text: `Your approved laboratory report ${reportId} is attached as a PDF.`,
+    subject: "Your Laboratory Test Report - HMS",
+    text: `${greeting}\n\n${body}`,
+    html: `
+      <div style="font-family: Arial, Helvetica, sans-serif; color: #1f2937; line-height: 1.6;">
+        <p>${escapeHtml(greeting)}</p>
+        <p>Your laboratory test report is ready.</p>
+        <p>Please find your laboratory report attached to this email.</p>
+        <p>For any clarification regarding your report, please contact the hospital laboratory department.</p>
+        <p>Thank you for choosing our services.</p>
+        <p style="margin-bottom: 0;">Regards,<br />HMS Laboratory Department</p>
+      </div>
+    `,
     attachments: [
       {
-        filename: `${reportId}.pdf`,
+        filename: `Lab_Report_${reportId}.pdf`,
         content: pdf,
         contentType: "application/pdf",
       },

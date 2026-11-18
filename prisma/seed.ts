@@ -19,6 +19,7 @@ const PERMISSIONS = [
   { key: "patient.create", name: "Create Patient", description: "Register new patients", category: "patient" },
   { key: "patient.read", name: "View Patients", description: "View patient list and details", category: "patient" },
   { key: "patient.update", name: "Edit Patient", description: "Edit patient information", category: "patient" },
+  { key: "patient.email.update", name: "Correct Patient Email", description: "Update only the registered patient email address", category: "patient" },
 
 
   // Appointment
@@ -61,6 +62,7 @@ const PERMISSIONS = [
 
   // Lab
   { key: "lab.order", name: "Order Lab Tests", description: "Create lab orders", category: "lab" },
+  { key: "lab_report.email.send", name: "Send Approved Lab Report by Email", description: "Send an approved lab report to the patient's registered email address", category: "lab" },
   { key: "lab.result", name: "View Lab Results", description: "View lab test results", category: "lab" },
   { key: "lab.manage", name: "Manage Lab", description: "Manage lab tests and categories", category: "lab" },
 
@@ -143,6 +145,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "report.export",
     "report.download",
     "lab.order",
+    "lab_report.email.send",
     "lab.result",
     "lab.manage",
     "pharmacy.dispense",
@@ -184,6 +187,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "department.read",
     "report.view",
     "lab.order",
+    "lab_report.email.send",
     "lab.result",
     "pharmacy.dispense",
     "pharmacy.inventory",
@@ -228,6 +232,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "encounter.read",
     "encounter.update",
     "lab.order",
+    "lab_report.email.send",
     "lab.result",
 
     // Oncology - a doctor makes the clinical calls: diagnosis/staging,
@@ -306,9 +311,11 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "employee.read",
     "patient.create",
     "patient.read",
+    "patient.email.update",
     "department.read",
     "appointment.read",
     "lab.order",
+    "lab_report.email.send",
     "lab.result",
     "lab.manage",
   ],
