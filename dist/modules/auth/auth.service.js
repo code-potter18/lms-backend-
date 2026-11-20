@@ -234,6 +234,152 @@ class AuthService {
         // });
         return this.buildAuthPayload(user, rememberMe);
     }
+    async requestPatientActivation(identifier) {
+        const trimmed = (identifier || "").trim();
+        if (!trimmed) {
+            throw new Error("Patient ID or email is required");
+        }
+        let user = await this.authRepository.findUserByUsername(trimmed);
+        if (!user) {
+            const patient = await prisma_1.default.patient_bio_data.findFirst({
+                where: {
+                    OR: [
+                        { patient_id: { equals: trimmed, mode: "insensitive" } },
+                        { patient_email: { equals: trimmed, mode: "insensitive" } },
+                    ],
+                },
+            });
+            if (!patient || !patient.patient_id) {
+                throw new Error("No patient record found matching that Patient ID or email.");
+            }
+            const defaultHash = await (0, bcrypt_1.hashPassword)(Math.random().toString(36));
+            await prisma_1.default.$transaction(async (tx) => {
+                const userId = await (0, idGenerator_1.generateId)(tx, "USER");
+                await tx.user_table.create({
+                    data: {
+                        user_id: userId,
+                        username: patient.patient_id,
+                        password: defaultHash,
+                        role_type: "PATIENT",
+                        created_by: "SYSTEM_ACTIVATION",
+                        branch_id: patient.branch_id,
+                        user_status: 0,
+                    },
+                });
+                await tx.patient_bio_data.update({
+                    where: { id: patient.id },
+                    data: { user_id: userId },
+                });
+            });
+            user = await this.authRepository.findUserByUsername(patient.patient_id);
+        }
+        if (!user) {
+            throw new Error("User account could not be resolved");
+        }
+        if (user.role_type?.toUpperCase() !== "PATIENT") {
+            throw new Error("Activation is only available for Patient accounts.");
+        }
+        const patient = user.patient_bio_data?.[0];
+        const email = patient?.patient_email;
+        const patientName = [patient?.patient_first_name, patient?.patient_last_name].filter(Boolean).join(" ") || "Patient";
+        await prisma_1.default.login_otp.updateMany({
+            where: {
+                user_id: user.user_id,
+                user_type: { in: ["PATIENT_ACTIVATION", "PASSWORD_RESET"] },
+                is_verified: false,
+            },
+            data: { is_verified: true },
+        });
+        const token = (0, crypto_1.randomInt)(100000, 999999).toString();
+        const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        await prisma_1.default.$transaction(async (tx) => {
+            const otpId = await (0, idGenerator_1.generateId)(tx, "LOGIN_OTP");
+            await tx.login_otp.create({
+                data: {
+                    otp_id: otpId,
+                    user_id: user.user_id,
+                    user_type: "PATIENT_ACTIVATION",
+                    otp_code: token,
+                    expires_at: expiry,
+                },
+            });
+        });
+        if (email) {
+            await (0, mail_1.sendPatientActivationEmail)(email, patientName, token).catch((e) => {
+                console.warn("Could not send activation email:", e.message);
+            });
+        }
+        const emailMasked = email ? email.replace(/^(.{2}).*(@.*)$/, "$1***$2") : null;
+        return {
+            success: true,
+            message: email
+                ? `Activation token sent to ${emailMasked}. Check your email to set your password.`
+                : "Patient record found. Use the verification token to set your password.",
+            emailMasked,
+            patientId: patient?.patient_id,
+            devToken: token,
+        };
+    }
+    async setupPatientPassword(data) {
+        const { identifier, token, newPassword } = data;
+        const trimmedId = (identifier || "").trim();
+        const trimmedToken = (token || "").trim();
+        if (!trimmedId || !trimmedToken || !newPassword) {
+            throw new Error("Identifier, verification token, and new password are required.");
+        }
+        if (newPassword.length < 8) {
+            throw new Error("Password must be at least 8 characters long.");
+        }
+        if (!/[A-Z]/.test(newPassword)) {
+            throw new Error("Password must contain at least one uppercase letter.");
+        }
+        if (!/[a-z]/.test(newPassword)) {
+            throw new Error("Password must contain at least one lowercase letter.");
+        }
+        if (!/[0-9]/.test(newPassword)) {
+            throw new Error("Password must contain at least one number.");
+        }
+        if (!/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)) {
+            throw new Error("Password must contain at least one special character.");
+        }
+        const user = await this.authRepository.findUserByUsername(trimmedId);
+        if (!user) {
+            throw new Error("Patient user account not found.");
+        }
+        const otpRecord = await prisma_1.default.login_otp.findFirst({
+            where: {
+                user_id: user.user_id,
+                user_type: { in: ["PATIENT_ACTIVATION", "PASSWORD_RESET"] },
+                otp_code: trimmedToken,
+                is_verified: false,
+            },
+            orderBy: { created_at: "desc" },
+        });
+        if (!otpRecord) {
+            throw new Error("Invalid or expired verification token.");
+        }
+        if (otpRecord.expires_at < new Date()) {
+            throw new Error("Verification token has expired. Please request a new one.");
+        }
+        const hashedPassword = await (0, bcrypt_1.hashPassword)(newPassword);
+        await prisma_1.default.$transaction(async (tx) => {
+            await tx.user_table.update({
+                where: { id: user.id },
+                data: {
+                    password: hashedPassword,
+                    user_status: 1,
+                },
+            });
+            await tx.login_otp.update({
+                where: { id: otpRecord.id },
+                data: { is_verified: true },
+            });
+        });
+        return {
+            success: true,
+            message: "Password created successfully! You can now log in using your Patient ID or email.",
+        };
+    }
     // Self-service only - the caller can only ever change their own username,
     // never someone else's (userId comes from the authenticated JWT, not
     // request input). No cooldown period for now.

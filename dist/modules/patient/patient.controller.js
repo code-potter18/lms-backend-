@@ -119,6 +119,13 @@ class PatientController {
     }
     async updatePatientEmail(req, res) {
         try {
+            const actorId = req.user?.user_id;
+            if (typeof actorId !== "string") {
+                return res.status(401).json({
+                    success: false,
+                    message: "The authenticated user cannot be recorded for email consent.",
+                });
+            }
             const errors = (0, express_validator_1.validationResult)(req);
             if (!errors.isEmpty()) {
                 return res.status(400).json({
@@ -127,7 +134,7 @@ class PatientController {
                     errors: errors.array()
                 });
             }
-            const patient = await service.updatePatientEmail(String(req.params.patientId), String(req.body.email));
+            const patient = await service.updatePatientEmail(String(req.params.patientId), String(req.body.email), actorId);
             return res.json({
                 success: true,
                 message: "Patient email updated successfully",

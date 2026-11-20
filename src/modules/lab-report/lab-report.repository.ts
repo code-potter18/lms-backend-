@@ -28,7 +28,17 @@ export class LabReportRepository {
             },
             employees: { select: { employee_id: true, first_name: true, last_name: true, designation: true } },
             department_master: true,
-            lab_order_item: { include: { lab_test_master: true, sample_collection: true } },
+            lab_order_item: {
+              include: {
+                lab_test_master: true,
+                sample_collection: true,
+                lab_result: {
+                  include: {
+                    lab_test_parameter: true,
+                  },
+                },
+              },
+            },
           },
         },
       },

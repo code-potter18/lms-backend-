@@ -32,11 +32,13 @@ class PatientService {
         }
         const hashedPassword = await bcrypt_1.default.hash(data.password, Number(process.env.BCRYPT_SALT_ROUNDS));
         return prisma_1.default.$transaction(async (tx) => {
+            const patientId = await (0, idGenerator_1.generateId)(tx, "PATIENT");
             const userId = await (0, idGenerator_1.generateId)(tx, "USER");
+            const finalUsername = (data.username && !data.username.startsWith("walkin_")) ? data.username : patientId;
             const user = await tx.user_table.create({
                 data: {
                     user_id: userId,
-                    username: data.username,
+                    username: finalUsername,
                     password: hashedPassword,
                     role_type: "PATIENT",
                     created_by: createdBy,
@@ -44,7 +46,6 @@ class PatientService {
                     user_status: 0
                 }
             });
-            const patientId = await (0, idGenerator_1.generateId)(tx, "PATIENT");
             const patient = await tx.patient_bio_data.create({
                 data: {
                     patient_id: patientId,
@@ -227,20 +228,42 @@ class PatientService {
                 : undefined
         });
     }
-    async updatePatientEmail(patientId, emailAddress) {
+    async updatePatientEmail(patientId, emailAddress, actorId) {
         const existing = await repository.getPatientById(patientId);
         if (!existing) {
             throw new Error("Patient not found");
         }
-        if (existing.patient_email?.trim()) {
-            throw new Error("This patient's registered email is already set and cannot be overwritten here.");
+        if (!actorId || actorId.length > 100) {
+            throw new Error("The authenticated user cannot be recorded for email consent.");
         }
         const email = emailAddress.trim();
+        /* Lab staff may correct the registered email from Report Transfer, so an
+           already-set address on the SAME patient can be replaced. The update is
+           always an UPDATE of the existing patient row - never a second patient. */
         const duplicate = await repository.findEmail(email);
-        if (duplicate) {
+        if (duplicate && duplicate.patient_id !== patientId) {
             throw new Error("Email already exists");
         }
-        return repository.updatePatient(patientId, { patient_email: email });
+        if (existing.patient_email?.trim().toLowerCase() === email.toLowerCase()) {
+            return existing;
+        }
+        /* Saving a corrected destination invalidates any prior consent for that
+           address. A fresh Report Transfer attestation is required before send. */
+        return prisma_1.default.$transaction(async (transaction) => {
+            const patient = await transaction.patient_bio_data.update({
+                where: { patient_id: patientId },
+                data: { patient_email: email },
+            });
+            await transaction.patient_email_consent.create({
+                data: {
+                    patient_id: patientId,
+                    email_address: email,
+                    consented: false,
+                    consented_by: actorId,
+                },
+            });
+            return patient;
+        });
     }
     async createPatientHistory(data, createdBy) {
         const hasAnyVital = data.systolicBp !== undefined ||

@@ -92,7 +92,7 @@ class LabReportController {
         await lab_report_whatsapp_service_1.labReportWhatsAppService.updateWebhookStatuses(req.body);
         return res.sendStatus(200);
     }
-    async setAuthenticatedApprover(req, data) {
+    async setAuthenticatedApprover(req, data, reportId) {
         const comment = typeof data.report_comment === "string"
             ? (() => {
                 try {
@@ -113,17 +113,118 @@ class LabReportController {
             throw new Error("Only approved reports can record an approving employee");
         }
         const authUser = req.user;
-        const role = String(authUser?.role ?? "").toUpperCase();
-        if (!["DOCTOR", "HEAD_ADMIN", "SUPER_ADMIN", "BRANCH_ADMIN", "ADMIN"].includes(role)) {
-            throw new Error("Only an authorized clinician or administrator can approve a report");
+        if (!authUser) {
+            throw new Error("Authentication required to approve report");
         }
-        if (typeof authUser?.user_id !== "string") {
-            throw new Error("The authenticated user cannot be linked to an employee record");
+        const role = String(authUser.role ?? authUser.role_type ?? "").toUpperCase();
+        const isDoctorOrAdmin = [
+            "DOCTOR",
+            "HEAD_ADMIN",
+            "SUPER_ADMIN",
+            "BRANCH_ADMIN",
+            "ADMIN",
+        ].includes(role);
+        const isLabTechnician = role === "LAB_TECHNICIAN";
+        if (!isDoctorOrAdmin && !isLabTechnician) {
+            throw new Error("Only an authorized clinician, administrator, or walk-in lab technician can approve a report");
         }
-        const employee = await prisma_1.default.employees.findUnique({
-            where: { user_id: authUser.user_id },
-            select: { employee_id: true },
-        });
+        // If LAB_TECHNICIAN, verify that this is an eligible standalone walk-in order
+        if (isLabTechnician) {
+            let targetOrderId = data.lab_order_id;
+            if (!targetOrderId && reportId) {
+                const existingReport = await prisma_1.default.lab_report.findUnique({
+                    where: { lab_report_id: reportId },
+                    select: { lab_order_id: true },
+                });
+                targetOrderId = existingReport?.lab_order_id;
+            }
+            const order = await prisma_1.default.lab_order.findFirst({
+                where: {
+                    OR: [
+                        ...(targetOrderId ? [{ lab_order_id: targetOrderId }] : []),
+                        ...(data.lab_order_item_id ? [{ lab_order_item: { some: { lab_order_item_id: data.lab_order_item_id } } }] : []),
+                        ...(data.barcode ? [{ lab_order_item: { some: { sample_collection: { some: { barcode: data.barcode } } } } }] : []),
+                    ],
+                },
+                include: {
+                    lab_order_item: {
+                        include: {
+                            lab_result: true,
+                            lab_test_master: true,
+                        },
+                    },
+                    patient_history: {
+                        include: {
+                            patient_bio_data: true,
+                        },
+                    },
+                },
+            });
+            if (!order) {
+                throw new Error("Cannot verify lab order for technician approval");
+            }
+            // 1. Verify standalone walk-in order
+            const isWalkIn = !order.appointment_id &&
+                (/walk-?in/i.test(order.clinical_notes || "") ||
+                    order.clinical_notes === "Walk-in laboratory registration");
+            if (!isWalkIn) {
+                throw new Error("Lab Technicians are only authorized to approve standalone walk-in laboratory reports. Doctor-referred orders require clinical doctor approval.");
+            }
+            // 2. Verify correct patient relationship
+            const patientId = order.patient_history?.patient_id ||
+                order.patient_history?.patient_bio_data?.patient_id;
+            if (!patientId) {
+                throw new Error("This laboratory order is not linked to a valid patient record");
+            }
+            // 3. Verify all required tests are completed
+            const items = order.lab_order_item || [];
+            if (items.length === 0) {
+                throw new Error("The laboratory order has no test items");
+            }
+            const incompleteItems = items.filter((it) => !["COMPLETED", "REPORT GENERATED"].includes((it.item_status || "").toUpperCase()));
+            if (incompleteItems.length > 0) {
+                const pendingNames = incompleteItems
+                    .map((it) => it.lab_test_master?.test_name || it.lab_order_item_id)
+                    .join(", ");
+                throw new Error(`Cannot approve incomplete order: waiting for ${pendingNames}`);
+            }
+            // 4. Verify all required results are available
+            const missingResultItems = items.filter((it) => !it.lab_result || it.lab_result.length === 0);
+            if (missingResultItems.length > 0) {
+                const missingNames = missingResultItems
+                    .map((it) => it.lab_test_master?.test_name || it.lab_order_item_id)
+                    .join(", ");
+                throw new Error(`Cannot approve order: test results missing for ${missingNames}`);
+            }
+        }
+        // Resolve authenticated employee ID
+        let employee = null;
+        if (typeof authUser?.user_id === "string") {
+            employee = await prisma_1.default.employees.findUnique({
+                where: { user_id: authUser.user_id },
+                select: { employee_id: true },
+            });
+        }
+        if (!employee && authUser?.username) {
+            employee = await prisma_1.default.employees.findFirst({
+                where: {
+                    user_table: { username: authUser.username },
+                },
+                select: { employee_id: true },
+            });
+        }
+        // For DOCTOR/ADMIN only (optional fallback if configured):
+        if (!employee && isDoctorOrAdmin && data.approved_by) {
+            employee = await prisma_1.default.employees.findFirst({
+                where: {
+                    OR: [
+                        { employee_id: data.approved_by },
+                        { first_name: { contains: data.approved_by, mode: "insensitive" } },
+                    ],
+                },
+                select: { employee_id: true },
+            });
+        }
         if (!employee) {
             throw new Error("The approving user is not linked to an employee record");
         }
@@ -145,6 +246,19 @@ class LabReportController {
             return res.status(500).json({
                 success: false,
                 message: error.message,
+            });
+        }
+    }
+    async getTransferQueue(req, res) {
+        try {
+            const branchId = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+            const queue = await service.getTransferQueue(branchId);
+            return res.json({ success: true, data: queue });
+        }
+        catch (error) {
+            return res.status(500).json({
+                success: false,
+                message: error instanceof Error ? error.message : "Could not load approved report transfer queue.",
             });
         }
     }
@@ -198,7 +312,7 @@ class LabReportController {
             });
         }
         catch (error) {
-            const status = /authorized clinician|authenticated user|employee record/i.test(error.message)
+            const status = /authorized|permission|authenticated|forbidden|employee record/i.test(error.message)
                 ? 403
                 : 400;
             return res.status(status).json({
@@ -219,7 +333,7 @@ class LabReportController {
             });
         }
         catch (error) {
-            const status = /authorized clinician|authenticated user|employee record/i.test(error.message)
+            const status = /authorized|permission|authenticated|forbidden|employee record/i.test(error.message)
                 ? 403
                 : 400;
             return res.status(status).json({

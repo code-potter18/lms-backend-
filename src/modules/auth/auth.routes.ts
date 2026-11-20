@@ -22,6 +22,14 @@ router.post(
     "/verify-otp",
     authController.verifyOtp.bind(authController)
 );
+router.post(
+    "/patient/setup-password-request",
+    authController.requestPatientActivation.bind(authController)
+);
+router.post(
+    "/patient/setup-password",
+    authController.setupPatientPassword.bind(authController)
+);
 router.get(
     "/me",
     authenticate,

@@ -56,14 +56,24 @@ const runAuthentication = async (
     req.user = decoded;
 
     // Check if role is allowed to login
-    const userRole = String(req.user?.role ?? "").toLowerCase();
-    const isPatientProfileRead =
-      userRole === PATIENT.toLowerCase() &&
-      req.method === "GET" &&
-      req.baseUrl.endsWith("/auth") &&
-      req.path === "/me";
+    const userRole = String(req.user?.role ?? req.user?.role_type ?? "").trim().toLowerCase();
+    const isPatient = userRole === PATIENT.toLowerCase();
+
+    // Patients can only access:
+    // 1. GET /api/auth/me (Initial identity resolution upon login)
+    // 2. All endpoints under /api/patient (The dedicated Patient Portal)
+    const isPatientAllowedRoute =
+      isPatient &&
+      ((req.method === "GET" && req.baseUrl.endsWith("/auth") && req.path === "/me") ||
+        req.baseUrl === "/api/patient" ||
+        req.baseUrl.startsWith("/api/patient/") ||
+        (typeof req.originalUrl === "string" &&
+          (req.originalUrl === "/api/patient" ||
+            req.originalUrl.startsWith("/api/patient/") ||
+            req.originalUrl.startsWith("/api/patient?"))));
+
     const isAllowed =
-      isPatientProfileRead ||
+      isPatientAllowedRoute ||
       LOGIN_ENABLED_ROLES.some((r) => r.toLowerCase() === userRole);
 
     if (!isAllowed) {

@@ -34,12 +34,20 @@ const runAuthentication = async (req, res, next, allowQueryToken) => {
         const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET);
         req.user = decoded;
         // Check if role is allowed to login
-        const userRole = String(req.user?.role ?? "").toLowerCase();
-        const isPatientProfileRead = userRole === roles_1.PATIENT.toLowerCase() &&
-            req.method === "GET" &&
-            req.baseUrl.endsWith("/auth") &&
-            req.path === "/me";
-        const isAllowed = isPatientProfileRead ||
+        const userRole = String(req.user?.role ?? req.user?.role_type ?? "").trim().toLowerCase();
+        const isPatient = userRole === roles_1.PATIENT.toLowerCase();
+        // Patients can only access:
+        // 1. GET /api/auth/me (Initial identity resolution upon login)
+        // 2. All endpoints under /api/patient (The dedicated Patient Portal)
+        const isPatientAllowedRoute = isPatient &&
+            ((req.method === "GET" && req.baseUrl.endsWith("/auth") && req.path === "/me") ||
+                req.baseUrl === "/api/patient" ||
+                req.baseUrl.startsWith("/api/patient/") ||
+                (typeof req.originalUrl === "string" &&
+                    (req.originalUrl === "/api/patient" ||
+                        req.originalUrl.startsWith("/api/patient/") ||
+                        req.originalUrl.startsWith("/api/patient?"))));
+        const isAllowed = isPatientAllowedRoute ||
             roles_1.LOGIN_ENABLED_ROLES.some((r) => r.toLowerCase() === userRole);
         if (!isAllowed) {
             return res.status(403).json({

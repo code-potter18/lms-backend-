@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const lab_order_repository_1 = __importDefault(require("./lab-order-repository"));
 const idGenerator_1 = require("../../utils/idGenerator");
+const patient_portal_service_1 = require("../patient-portal/patient-portal.service");
 const MAX_LAB_ORDER_ID_ATTEMPTS = 10;
 let lastLabOrderTimestamp = 0;
 function nextLabOrderId() {
@@ -105,10 +106,14 @@ class LabOrderService {
         };
         for (let attempt = 0; attempt < MAX_LAB_ORDER_ID_ATTEMPTS; attempt += 1) {
             try {
-                return await lab_order_repository_1.default.create({
+                const created = await lab_order_repository_1.default.create({
                     ...orderData,
                     lab_order_id: nextLabOrderId()
                 });
+                if (data.patient_id) {
+                    patient_portal_service_1.PatientPortalService.createNotification(data.patient_id, "Test Registered", `Your laboratory order #${created.lab_order_id} has been registered.`, "TEST_REGISTERED", created.lab_order_id).catch(() => { });
+                }
+                return created;
             }
             catch (error) {
                 if (!isUniqueConstraintError(error)) {

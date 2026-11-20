@@ -45,6 +45,7 @@ const referral_routes_1 = __importDefault(require("./modules/referral/referral.r
 const priorityFlags_routes_1 = __importDefault(require("./modules/priority-flags/priorityFlags.routes"));
 const ai_chat_routes_1 = __importDefault(require("./modules/ai/ai-chat.routes"));
 const patientDocument_routes_1 = __importDefault(require("./modules/patient-document/patientDocument.routes"));
+const patient_portal_routes_1 = __importDefault(require("./modules/patient-portal/patient-portal.routes"));
 const bcrypt_1 = require("./utils/bcrypt");
 // Fix BigInt serialization - Prisma returns BigInt types
 // that JSON.stringify can't handle
@@ -128,6 +129,7 @@ app.use("/api/users", user_routes_1.default);
 app.use("/api/branch", branch_routes_1.default);
 app.use("/api/departments", department_routes_1.default);
 app.use("/api/patients", patient_routes_1.default);
+app.use("/api/patient", patient_portal_routes_1.default);
 app.use("/api/appointments", appointment_routes_1.default);
 app.use("/api/lab-test-category", lab_test_category_routes_1.default);
 app.use("/api/lab-test-master", lab_test_master_routes_1.default);
@@ -171,6 +173,9 @@ const PORT = process.env.PORT || 5000;
 // Daily day-boundary sweeps (appointment NO_SHOW, IPD bed reservations and
 // planned-admission NO_SHOW) run inside Postgres via pg_cron -- see
 // prisma/sql/20261007_daily_sweeps_pg_cron.sql. Nothing is polled from here.
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+if (process.env.NODE_ENV !== "test") {
+    app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+    });
+}
+exports.default = app;

@@ -246,5 +246,43 @@ class AuthController {
             });
         }
     }
+    async requestPatientActivation(req, res) {
+        try {
+            const { identifier } = req.body;
+            if (!identifier) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Patient ID or email is required",
+                });
+            }
+            const result = await authService.requestPatientActivation(identifier);
+            return res.status(200).json(result);
+        }
+        catch (error) {
+            return res.status(400).json({
+                success: false,
+                message: error.message,
+            });
+        }
+    }
+    async setupPatientPassword(req, res) {
+        try {
+            const { identifier, token, newPassword } = req.body;
+            if (!identifier || !token || !newPassword) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Identifier, verification token, and new password are required",
+                });
+            }
+            const result = await authService.setupPatientPassword({ identifier, token, newPassword });
+            return res.status(200).json(result);
+        }
+        catch (error) {
+            return res.status(400).json({
+                success: false,
+                message: error.message,
+            });
+        }
+    }
 }
 exports.AuthController = AuthController;

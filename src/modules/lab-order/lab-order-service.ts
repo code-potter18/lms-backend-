@@ -1,6 +1,7 @@
 import prisma from "../../config/prisma";
 import repository from "./lab-order-repository";
 import { generateId } from "../../utils/idGenerator";
+import { PatientPortalService } from "../patient-portal/patient-portal.service";
 
 import {
     CreateLabOrderDto,
@@ -150,10 +151,22 @@ class LabOrderService {
 
         for (let attempt = 0; attempt < MAX_LAB_ORDER_ID_ATTEMPTS; attempt += 1) {
             try {
-                return await repository.create({
+                const created = await repository.create({
                     ...orderData,
                     lab_order_id: nextLabOrderId()
                 });
+
+                if (data.patient_id) {
+                    PatientPortalService.createNotification(
+                        data.patient_id,
+                        "Test Registered",
+                        `Your laboratory order #${created.lab_order_id} has been registered.`,
+                        "TEST_REGISTERED",
+                        created.lab_order_id
+                    ).catch(() => {});
+                }
+
+                return created;
             } catch (error) {
                 if (!isUniqueConstraintError(error)) {
                     throw error;

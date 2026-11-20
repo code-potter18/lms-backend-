@@ -9,12 +9,37 @@ export class AuthRepository {
   }
 
   async findUserByUsername(username: string) {
+    const trimmed = (username || "").trim();
     return prisma.user_table.findFirst({
       where: {
-        username: {
-          equals: username,
-          mode: "insensitive",
-        },
+        OR: [
+          {
+            username: {
+              equals: trimmed,
+              mode: "insensitive",
+            },
+          },
+          {
+            patient_bio_data: {
+              some: {
+                OR: [
+                  {
+                    patient_id: {
+                      equals: trimmed,
+                      mode: "insensitive",
+                    },
+                  },
+                  {
+                    patient_email: {
+                      equals: trimmed,
+                      mode: "insensitive",
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
       },
       include: {
         branch: true,

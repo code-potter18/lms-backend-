@@ -57,7 +57,9 @@ export class PatientService {
 
         return prisma.$transaction(async (tx) => {
 
+            const patientId = await generateId(tx, "PATIENT");
             const userId = await generateId(tx, "USER");
+            const finalUsername = (data.username && !data.username.startsWith("walkin_")) ? data.username : patientId;
 
             const user = await tx.user_table.create({
 
@@ -65,7 +67,7 @@ export class PatientService {
 
                     user_id: userId,
 
-                    username: data.username,
+                    username: finalUsername,
 
                     password: hashedPassword,
 
@@ -80,8 +82,6 @@ export class PatientService {
                 }
 
             });
-
-            const patientId = await generateId(tx, "PATIENT");
 
             const patient = await tx.patient_bio_data.create({
 

@@ -154,3 +154,66 @@ export const sendLabReportEmail = async (
     ],
   });
 };
+
+export const sendPatientActivationEmail = async (
+  to: string,
+  patientName: string,
+  token: string
+) => {
+  if (!isSmtpConfigured()) {
+    console.warn(
+      `[dev] SMTP not configured - Patient activation token for ${to}: ${token}`
+    );
+    return;
+  }
+
+  const name = patientName?.trim() || "Patient";
+  return getTransporter().sendMail({
+    from: process.env.MAIL_FROM || process.env.MAIL_USER,
+    to,
+    subject: "Set Your Patient Portal Password - Laboratory Services",
+    html: `
+      <div style="font-family: Arial, Helvetica, sans-serif; color: #1f2937; line-height: 1.6; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #00488D;">Welcome to Laboratory Patient Portal</h2>
+        <p>Dear ${escapeHtml(name)},</p>
+        <p>Your patient account has been created. Use the verification token below to set your password and access your test results and reports:</p>
+        <div style="background-color: #F0F4F8; padding: 15px; border-radius: 8px; text-align: center; margin: 20px 0;">
+          <span style="font-size: 28px; font-weight: bold; letter-spacing: 4px; color: #00488D;">${escapeHtml(token)}</span>
+        </div>
+        <p>This token is valid for 24 hours. For security, never share this token with anyone.</p>
+        <p>Regards,<br />Laboratory Department</p>
+      </div>
+    `,
+  });
+};
+
+export const sendPatientReportAvailableEmail = async (
+  to: string,
+  patientName: string,
+  reportId: string,
+  testNames?: string[]
+) => {
+  if (!isSmtpConfigured()) {
+    console.warn(
+      `[dev] SMTP not configured - Report available notification for ${to} (Report: ${reportId})`
+    );
+    return;
+  }
+
+  const name = patientName?.trim() || "Patient";
+  const testsStr = testNames?.length ? ` (${testNames.join(", ")})` : "";
+  return getTransporter().sendMail({
+    from: process.env.MAIL_FROM || process.env.MAIL_USER,
+    to,
+    subject: `Your Lab Report is Ready${testsStr}`,
+    html: `
+      <div style="font-family: Arial, Helvetica, sans-serif; color: #1f2937; line-height: 1.6; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #00488D;">Laboratory Test Report Ready</h2>
+        <p>Dear ${escapeHtml(name)},</p>
+        <p>Your laboratory test report <strong>#${escapeHtml(reportId)}</strong>${escapeHtml(testsStr)} has been approved and is now available in your Patient Portal.</p>
+        <p>Please log in to your Patient Portal to view and securely download your report.</p>
+        <p>Regards,<br />Laboratory Department</p>
+      </div>
+    `,
+  });
+};

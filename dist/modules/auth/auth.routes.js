@@ -14,6 +14,8 @@ const authController = new auth_controller_1.AuthController();
 router.post("/login", authController.login.bind(authController));
 router.post("/send-otp", authController.sendOtp.bind(authController));
 router.post("/verify-otp", authController.verifyOtp.bind(authController));
+router.post("/patient/setup-password-request", authController.requestPatientActivation.bind(authController));
+router.post("/patient/setup-password", authController.setupPatientPassword.bind(authController));
 router.get("/me", auth_middleware_1.authenticate, async (req, res) => {
     const authUser = req.user;
     // employee_id isn't in the JWT payload -- the frontend needs it to

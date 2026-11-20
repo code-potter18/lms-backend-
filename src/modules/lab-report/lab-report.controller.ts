@@ -105,12 +105,15 @@ export class LabReportController {
 
   private async setAuthenticatedApprover<
     T extends {
+      lab_order_id?: string;
+      lab_order_item_id?: string;
+      barcode?: string;
       report_comment?: string | Record<string, unknown>;
       overall_decision?: string;
       approved_by?: string;
       approved_datetime?: Date | string;
     },
-  >(req: Request, data: T): Promise<T> {
+  >(req: Request, data: T, reportId?: string): Promise<T> {
     const comment =
       typeof data.report_comment === "string"
         ? (() => {
@@ -135,29 +138,152 @@ export class LabReportController {
     }
 
     const authUser = (req as AuthRequest).user;
-    const role = String(authUser?.role ?? "").toUpperCase();
-    if (
-      ![
-        "DOCTOR",
-        "HEAD_ADMIN",
-        "SUPER_ADMIN",
-        "BRANCH_ADMIN",
-        "ADMIN",
-        "LAB_TECHNICIAN",
-      ].includes(role)
-    ) {
+    if (!authUser) {
+      throw new Error("Authentication required to approve report");
+    }
+    const role = String(authUser.role ?? authUser.role_type ?? "").toUpperCase();
+
+    const isDoctorOrAdmin = [
+      "DOCTOR",
+      "HEAD_ADMIN",
+      "SUPER_ADMIN",
+      "BRANCH_ADMIN",
+      "ADMIN",
+    ].includes(role);
+
+    const isLabTechnician = role === "LAB_TECHNICIAN";
+
+    if (!isDoctorOrAdmin && !isLabTechnician) {
       throw new Error(
-        "Only an authorized clinician, administrator, or lab technician can approve a report",
+        "Only an authorized clinician, administrator, or walk-in lab technician can approve a report",
       );
     }
-    if (typeof authUser?.user_id !== "string") {
-      throw new Error("The authenticated user cannot be linked to an employee record");
+
+    // If LAB_TECHNICIAN, verify that this is an eligible standalone walk-in order
+    if (isLabTechnician) {
+      let targetOrderId = (data as any).lab_order_id;
+      if (!targetOrderId && reportId) {
+        const existingReport = await prisma.lab_report.findUnique({
+          where: { lab_report_id: reportId },
+          select: { lab_order_id: true },
+        });
+        targetOrderId = existingReport?.lab_order_id;
+      }
+
+      const order = await prisma.lab_order.findFirst({
+        where: {
+          OR: [
+            ...(targetOrderId ? [{ lab_order_id: targetOrderId }] : []),
+            ...((data as any).lab_order_item_id ? [{ lab_order_item: { some: { lab_order_item_id: (data as any).lab_order_item_id } } }] : []),
+            ...((data as any).barcode ? [{ lab_order_item: { some: { sample_collection: { some: { barcode: (data as any).barcode } } } } }] : []),
+          ],
+        },
+        include: {
+          lab_order_item: {
+            include: {
+              lab_result: true,
+              lab_test_master: true,
+            },
+          },
+          patient_history: {
+            include: {
+              patient_bio_data: true,
+            },
+          },
+        },
+      });
+
+      if (!order) {
+        throw new Error("Cannot verify lab order for technician approval");
+      }
+
+      // 1. Verify standalone walk-in order
+      const isWalkIn =
+        !order.appointment_id &&
+        (/walk-?in/i.test(order.clinical_notes || "") ||
+          order.clinical_notes === "Walk-in laboratory registration");
+
+      if (!isWalkIn) {
+        throw new Error(
+          "Lab Technicians are only authorized to approve standalone walk-in laboratory reports. Doctor-referred orders require clinical doctor approval.",
+        );
+      }
+
+      // 2. Verify correct patient relationship
+      const patientId =
+        order.patient_history?.patient_id ||
+        order.patient_history?.patient_bio_data?.patient_id;
+      if (!patientId) {
+        throw new Error(
+          "This laboratory order is not linked to a valid patient record",
+        );
+      }
+
+      // 3. Verify all required tests are completed
+      const items = order.lab_order_item || [];
+      if (items.length === 0) {
+        throw new Error("The laboratory order has no test items");
+      }
+      const incompleteItems = items.filter(
+        (it) =>
+          !["COMPLETED", "REPORT GENERATED"].includes(
+            (it.item_status || "").toUpperCase(),
+          ),
+      );
+      if (incompleteItems.length > 0) {
+        const pendingNames = incompleteItems
+          .map((it) => it.lab_test_master?.test_name || it.lab_order_item_id)
+          .join(", ");
+        throw new Error(
+          `Cannot approve incomplete order: waiting for ${pendingNames}`,
+        );
+      }
+
+      // 4. Verify all required results are available
+      const missingResultItems = items.filter(
+        (it) => !it.lab_result || it.lab_result.length === 0,
+      );
+      if (missingResultItems.length > 0) {
+        const missingNames = missingResultItems
+          .map((it) => it.lab_test_master?.test_name || it.lab_order_item_id)
+          .join(", ");
+        throw new Error(
+          `Cannot approve order: test results missing for ${missingNames}`,
+        );
+      }
     }
 
-    const employee = await prisma.employees.findUnique({
-      where: { user_id: authUser.user_id },
-      select: { employee_id: true },
-    });
+    // Resolve authenticated employee ID
+    let employee = null;
+    if (typeof authUser?.user_id === "string") {
+      employee = await prisma.employees.findUnique({
+        where: { user_id: authUser.user_id },
+        select: { employee_id: true },
+      });
+    }
+
+    if (!employee && authUser?.username) {
+      employee = await prisma.employees.findFirst({
+        where: {
+          user_table: { username: authUser.username },
+        },
+        select: { employee_id: true },
+      });
+    }
+
+    // For DOCTOR/ADMIN only (optional fallback if configured):
+    if (!employee && isDoctorOrAdmin && data.approved_by) {
+      employee = await prisma.employees.findFirst({
+        where: {
+          OR: [
+            { employee_id: data.approved_by },
+            { first_name: { contains: data.approved_by, mode: "insensitive" } },
+          ],
+        },
+        select: { employee_id: true },
+      });
+    }
+
     if (!employee) {
       throw new Error("The approving user is not linked to an employee record");
     }
@@ -250,7 +376,7 @@ export class LabReportController {
         data: report,
       });
     } catch (error: any) {
-      const status = /authorized clinician|authenticated user|employee record/i.test(
+      const status = /authorized|permission|authenticated|forbidden|employee record/i.test(
         error.message,
       )
         ? 403
@@ -276,7 +402,7 @@ export class LabReportController {
         data: updated,
       });
     } catch (error: any) {
-      const status = /authorized clinician|authenticated user|employee record/i.test(
+      const status = /authorized|permission|authenticated|forbidden|employee record/i.test(
         error.message,
       )
         ? 403

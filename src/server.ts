@@ -42,6 +42,7 @@ import referralRoutes from "./modules/referral/referral.routes";
 import priorityFlagsRoutes from "./modules/priority-flags/priorityFlags.routes";
 import aiChatRoutes from "./modules/ai/ai-chat.routes";
 import patientDocumentRoutes from "./modules/patient-document/patientDocument.routes";
+import patientPortalRoutes from "./modules/patient-portal/patient-portal.routes";
 
 import { hashPassword } from "./utils/bcrypt";
 
@@ -145,6 +146,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/branch", branchRoutes);
 app.use("/api/departments", departmentRoutes);
 app.use("/api/patients", patientRoutes);
+app.use("/api/patient", patientPortalRoutes);
 app.use("/api/appointments", appointmentRoutes);
 app.use("/api/lab-test-category", labTestCategoryRoutes);
 app.use("/api/lab-test-master", labTestMasterRoutes);
@@ -199,8 +201,10 @@ const PORT = process.env.PORT || 5000;
 // planned-admission NO_SHOW) run inside Postgres via pg_cron -- see
 // prisma/sql/20261007_daily_sweeps_pg_cron.sql. Nothing is polled from here.
 
-app.listen(PORT, () => {
-
+if (process.env.NODE_ENV !== "test") {
+  app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+  });
+}
 
-});
+export default app;

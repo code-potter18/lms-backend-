@@ -1,0 +1,23 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../auth/auth.middleware");
+const patient_portal_middleware_1 = require("./patient-portal.middleware");
+const patient_portal_controller_1 = require("./patient-portal.controller");
+const router = (0, express_1.Router)();
+const controller = new patient_portal_controller_1.PatientPortalController();
+// All patient portal routes strictly require JWT authentication and PATIENT role authorization
+router.use(auth_middleware_1.authenticate);
+router.use(patient_portal_middleware_1.authorizePatient);
+router.get("/profile", controller.getProfile.bind(controller));
+router.put("/profile", controller.updateProfile.bind(controller));
+router.get("/dashboard", controller.getDashboard.bind(controller));
+router.get("/lab-tests", controller.getLabTests.bind(controller));
+router.get("/test-status", controller.getTestStatus.bind(controller));
+router.get("/reports", controller.getReports.bind(controller));
+router.get("/reports/:id/view", controller.viewReportPdf.bind(controller));
+router.get("/reports/:id/download", controller.downloadReportPdf.bind(controller));
+router.get("/notifications", controller.getNotifications.bind(controller));
+router.put("/notifications/mark-all-read", controller.markAllNotificationsRead.bind(controller));
+router.put("/notifications/:id/read", controller.markNotificationRead.bind(controller));
+exports.default = router;

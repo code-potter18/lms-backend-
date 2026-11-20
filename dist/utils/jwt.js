@@ -14,11 +14,10 @@ const generateToken = (user, rememberMe = false) => {
         employee_id: user.employee_id,
         username: user.username,
         role: user.role,
-        hospital_id: user.hospital_id
+        role_type: user.role_type || user.role,
+        hospital_id: user.hospital_id,
     }, process.env.JWT_SECRET, {
-        expiresIn: rememberMe
-            ? "12h"
-            : "12h"
+        expiresIn: rememberMe ? "12h" : "12h",
     });
 };
 exports.generateToken = generateToken;

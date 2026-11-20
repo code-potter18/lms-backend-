@@ -18,6 +18,7 @@ export interface CreateLabReportDto {
   clinical_correlation?: string;
   overall_decision?: string;
   lab_order_item_id?: string;
+  barcode?: string;
 }
 
 export interface UpdateLabReportDto {

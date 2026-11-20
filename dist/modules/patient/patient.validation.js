@@ -26,22 +26,17 @@ exports.createPatientValidation = [
     (0, express_validator_1.body)("mobile")
         .isMobilePhone("any")
         .withMessage("Valid mobile number is required"),
+    // Every new patient must supply an email: it is the delivery address for
+    // their approved laboratory report. Legacy patients without an email are
+    // unaffected because this validation only runs on patient creation.
     (0, express_validator_1.body)("email")
-        .if((0, express_validator_1.body)("registration_source").equals("LAB_WALK_IN"))
         .isString()
-        .withMessage("Email is required for lab walk-in registration")
+        .withMessage("Email is required")
         .bail()
         .trim()
         .notEmpty()
-        .withMessage("Email is required for lab walk-in registration")
+        .withMessage("Email is required")
         .bail()
-        .isEmail()
-        .withMessage("Valid email is required")
-        .bail()
-        .isLength({ max: 254 })
-        .withMessage("Email must be 254 characters or fewer"),
-    (0, express_validator_1.body)("email")
-        .optional({ nullable: true, checkFalsy: true })
         .isEmail()
         .withMessage("Valid email is required")
         .bail()
