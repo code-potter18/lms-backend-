@@ -6,7 +6,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.LabReportService = void 0;
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const lab_report_repository_1 = require("./lab-report.repository");
-const patient_portal_service_1 = require("../patient-portal/patient-portal.service");
 const mail_1 = require("../../utils/mail");
 const repository = new lab_report_repository_1.LabReportRepository();
 /* report_comment is a jsonb column holding the report's comment object:
@@ -386,10 +385,6 @@ class LabReportService {
                 const testNames = (finalSavedReport.lab_order?.lab_order_item || [])
                     .map((i) => i.lab_test_master?.test_name)
                     .filter(Boolean);
-                const testsStr = testNames.length > 0 ? ` (${testNames.join(", ")})` : "";
-                // Trigger in-app notifications
-                patient_portal_service_1.PatientPortalService.createNotification(patientId, "Report Approved", `Your laboratory diagnostic report #${finalSavedReport.lab_report_id}${testsStr} has been approved.`, "REPORT_APPROVED", finalSavedReport.lab_report_id).catch(() => { });
-                patient_portal_service_1.PatientPortalService.createNotification(patientId, "Report Available", `Your laboratory report #${finalSavedReport.lab_report_id} is now available in your Patient Portal for viewing and download.`, "REPORT_AVAILABLE", finalSavedReport.lab_report_id).catch(() => { });
                 // Trigger email notification if patient email exists
                 prisma_1.default.patient_bio_data
                     .findFirst({

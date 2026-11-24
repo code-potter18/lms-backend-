@@ -1,7 +1,6 @@
 import { randomUUID } from "crypto";
 import prisma from "../../config/prisma";
 import { LabOrderItemRepository } from "./lab-order-item.repository";
-import { PatientPortalService } from "../patient-portal/patient-portal.service";
 import {
     CreateLabOrderItemDto,
     UpdateLabOrderItemDto
@@ -105,60 +104,6 @@ export class LabOrderItemService {
                 ...toTargetDateData(target_date)
             }
         );
-
-        if (data.item_status) {
-            prisma.lab_order_item
-                .findUnique({
-                    where: { lab_order_item_id },
-                    include: {
-                        lab_order: {
-                            include: { patient_history: true },
-                        },
-                        lab_test_master: true,
-                    },
-                })
-                .then((item) => {
-                    const patientId = item?.lab_order?.patient_history?.patient_id;
-                    const testName = item?.lab_test_master?.test_name || "Diagnostic Test";
-                    if (!patientId) return;
-
-                    const s = data.item_status!.toLowerCase();
-                    if (s.includes("collect")) {
-                        PatientPortalService.createNotification(
-                            patientId,
-                            "Sample Collected",
-                            `Sample for ${testName} has been collected.`,
-                            "SAMPLE_COLLECTED",
-                            lab_order_item_id
-                        );
-                    } else if (s.includes("verif") || s.includes("accept")) {
-                        PatientPortalService.createNotification(
-                            patientId,
-                            "Sample Verified",
-                            `Sample for ${testName} has been verified and accepted by the lab.`,
-                            "SAMPLE_VERIFIED",
-                            lab_order_item_id
-                        );
-                    } else if (s.includes("testing") || s.includes("in-progress")) {
-                        PatientPortalService.createNotification(
-                            patientId,
-                            "Testing In Progress",
-                            `Testing has begun for ${testName}.`,
-                            "TESTING_STARTED",
-                            lab_order_item_id
-                        );
-                    } else if (s.includes("complete") || s.includes("review")) {
-                        PatientPortalService.createNotification(
-                            patientId,
-                            "Testing Completed",
-                            `Testing completed for ${testName}. Awaiting pathologist review.`,
-                            "TESTING_COMPLETED",
-                            lab_order_item_id
-                        );
-                    }
-                })
-                .catch(() => {});
-        }
 
         return updated;
 

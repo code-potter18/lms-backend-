@@ -35,6 +35,7 @@ export interface UpdatePatientContactDTO {
   emergency_contact_name?: string;
   emergency_contact_relation?: string;
   emergency_contact_number?: string;
+  operation_id?: string;
 }
 
 export interface PatientDashboardResponse {

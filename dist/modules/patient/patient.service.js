@@ -1,24 +1,55 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PatientService = void 0;
-const bcrypt_1 = __importDefault(require("bcrypt"));
+const crypto_1 = __importStar(require("crypto"));
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const patient_repository_1 = require("./patient.repository");
 const idGenerator_1 = require("../../utils/idGenerator");
 const patient_contact_utils_1 = require("./patient-contact.utils");
+const bcrypt_1 = require("../../utils/bcrypt");
+const mail_1 = require("../../utils/mail");
 const repository = new patient_repository_1.PatientRepository();
 class PatientService {
     async findContactDuplicates(mobile, email, branchId) {
         return repository.findContactDuplicates((0, patient_contact_utils_1.phoneMatchVariants)(mobile), email?.trim().toLowerCase() ?? "", branchId);
     }
     async createPatient(data, createdBy) {
-        const username = await repository.findUsername(data.username);
-        if (username) {
-            throw new Error("Username already exists");
-        }
         const contactDuplicates = await this.findContactDuplicates(data.mobile, data.email);
         if (contactDuplicates.some((match) => match.matched_by_mobile)) {
             throw new Error("Mobile already exists");
@@ -30,11 +61,41 @@ class PatientService {
         if (!branch) {
             throw new Error("Branch not found");
         }
-        const hashedPassword = await bcrypt_1.default.hash(data.password, Number(process.env.BCRYPT_SALT_ROUNDS));
-        return prisma_1.default.$transaction(async (tx) => {
+        // Generate a unique portal username based on the patient's First Name
+        let finalUsername;
+        const isLabWalkIn = data.registration_source === "LAB_WALK_IN";
+        const hasExplicitCustomUsername = data.username &&
+            !isLabWalkIn &&
+            !data.username.startsWith("walkin_") &&
+            !/^PAT\d+$/i.test(data.username.trim());
+        if (hasExplicitCustomUsername) {
+            const trimmed = data.username.trim().toLowerCase();
+            const existing = await repository.findUsername(trimmed);
+            if (existing) {
+                throw new Error("Username already exists");
+            }
+            finalUsername = trimmed;
+        }
+        else {
+            const cleanFirst = (data.first_name || "")
+                .trim()
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, "");
+            const baseUsername = cleanFirst || "patient";
+            let candidate = baseUsername;
+            let counter = 2;
+            while (await repository.findUsername(candidate)) {
+                candidate = `${baseUsername}${counter}`;
+                counter++;
+            }
+            finalUsername = candidate;
+        }
+        const hashedPassword = data.password
+            ? await (0, bcrypt_1.hashPassword)(data.password)
+            : await (0, bcrypt_1.hashPassword)(crypto_1.default.randomUUID());
+        const result = await prisma_1.default.$transaction(async (tx) => {
             const patientId = await (0, idGenerator_1.generateId)(tx, "PATIENT");
             const userId = await (0, idGenerator_1.generateId)(tx, "USER");
-            const finalUsername = (data.username && !data.username.startsWith("walkin_")) ? data.username : patientId;
             const user = await tx.user_table.create({
                 data: {
                     user_id: userId,
@@ -43,7 +104,7 @@ class PatientService {
                     role_type: "PATIENT",
                     created_by: createdBy,
                     branch_id: data.branch_id,
-                    user_status: 0
+                    user_status: 2 // PENDING_ACTIVATION
                 }
             });
             const patient = await tx.patient_bio_data.create({
@@ -99,6 +160,20 @@ class PatientService {
                         : null
                 }
             });
+            // Create single-use activation token expiring in 24 hours
+            const activationToken = (0, crypto_1.randomInt)(100000, 999999).toString();
+            const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+            const otpId = await (0, idGenerator_1.generateId)(tx, "LOGIN_OTP");
+            await tx.login_otp.create({
+                data: {
+                    otp_id: otpId,
+                    user_id: userId,
+                    user_type: "PATIENT_ACTIVATION",
+                    otp_code: activationToken,
+                    expires_at: expiry,
+                    is_verified: false,
+                }
+            });
             return {
                 patient: {
                     patient_id: patient.patient_id,
@@ -108,10 +183,24 @@ class PatientService {
                 },
                 user: {
                     user_id: user.user_id,
-                    username: user.username
-                }
+                    username: user.username,
+                    user_status: "PENDING_ACTIVATION"
+                },
+                activationToken,
+                patientEmail: data.email,
+                patientFullName: [data.first_name, data.last_name].filter(Boolean).join(" ")
             };
         });
+        // Send activation email with the secure activation link and token
+        if (result.patientEmail) {
+            await (0, mail_1.sendPatientActivationEmail)(result.patientEmail, result.patientFullName, result.activationToken, result.patient.patient_id, result.user.username, false).catch((err) => {
+                console.warn("Could not send patient activation email:", err.message);
+            });
+        }
+        return {
+            patient: result.patient,
+            user: result.user
+        };
     }
     async getPatients(query) {
         return repository.getPatients(query);

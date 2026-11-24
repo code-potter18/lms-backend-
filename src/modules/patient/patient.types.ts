@@ -1,8 +1,9 @@
 export interface CreatePatientRequest {
 
-    // Login Information
-    username: string;
-    password: string;
+    // Login Information (optional - generated automatically if omitted)
+    username?: string;
+    password?: string;
+    registration_source?: string;
 
     // Basic Details
     first_name: string;

@@ -15,10 +15,15 @@ export const checkPatientContactDuplicatesValidation = [
 export const createPatientValidation = [
 
     body("username")
-        .notEmpty()
-        .withMessage("Username is required"),
+        .optional({ nullable: true, checkFalsy: true })
+        .isString(),
+
+    body("registration_source")
+        .optional({ nullable: true, checkFalsy: true })
+        .isString(),
 
     body("password")
+        .optional({ nullable: true, checkFalsy: true })
         .isLength({ min: 6 })
         .withMessage("Password should contain minimum 6 characters"),
 

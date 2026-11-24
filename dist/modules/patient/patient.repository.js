@@ -10,7 +10,10 @@ class PatientRepository {
     async findUsername(username) {
         return prisma_1.default.user_table.findFirst({
             where: {
-                username
+                username: {
+                    equals: (username || "").trim(),
+                    mode: "insensitive"
+                }
             }
         });
     }

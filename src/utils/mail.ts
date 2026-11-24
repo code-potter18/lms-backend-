@@ -158,29 +158,55 @@ export const sendLabReportEmail = async (
 export const sendPatientActivationEmail = async (
   to: string,
   patientName: string,
-  token: string
+  token: string,
+  patientId?: string | null,
+  username?: string | null,
+  isReset: boolean = false
 ) => {
+  const portalUrl =
+    process.env.PATIENT_PORTAL_URL ||
+    process.env.CLIENT_URL ||
+    "http://localhost:5173";
+  const activationUrl = `${portalUrl}/set-password?id=${encodeURIComponent(
+    username || patientId || ""
+  )}${isReset ? "&mode=reset" : "&mode=activate"}`;
+
+  const subject = isReset
+    ? "Reset Your Patient Portal Password - Laboratory Services"
+    : "Activate Your Patient Portal Account - Laboratory Services";
+
+  const actionText = isReset
+    ? "reset your password"
+    : "set your password and activate your account";
+  const buttonLabel = isReset ? "Reset Password" : "Activate Account";
+
   if (!isSmtpConfigured()) {
     console.warn(
-      `[dev] SMTP not configured - Patient activation token for ${to}: ${token}`
+      `[SMTP Notification] ${subject} prepared for ${to}. Email delivery skipped.`
     );
     return;
   }
 
   const name = patientName?.trim() || "Patient";
+  const identifierDisplay = username || patientId;
   return getTransporter().sendMail({
     from: process.env.MAIL_FROM || process.env.MAIL_USER,
     to,
-    subject: "Set Your Patient Portal Password - Laboratory Services",
+    subject,
     html: `
       <div style="font-family: Arial, Helvetica, sans-serif; color: #1f2937; line-height: 1.6; max-width: 600px; margin: 0 auto; padding: 20px;">
         <h2 style="color: #00488D;">Welcome to Laboratory Patient Portal</h2>
         <p>Dear ${escapeHtml(name)},</p>
-        <p>Your patient account has been created. Use the verification token below to set your password and access your test results and reports:</p>
-        <div style="background-color: #F0F4F8; padding: 15px; border-radius: 8px; text-align: center; margin: 20px 0;">
+        <p>Your patient portal account has been prepared${identifierDisplay ? ` with Username: <strong>${escapeHtml(identifierDisplay)}</strong>` : ""}.</p>
+        <p>Please click the button below to ${actionText}:</p>
+        <div style="text-align: center; margin: 25px 0;">
+          <a href="${activationUrl}" style="background-color: #00488D; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">${buttonLabel}</a>
+        </div>
+        <p>Or enter your 6-digit verification token manually on the activation page:</p>
+        <div style="background-color: #F0F4F8; padding: 15px; border-radius: 8px; text-align: center; margin: 15px 0;">
           <span style="font-size: 28px; font-weight: bold; letter-spacing: 4px; color: #00488D;">${escapeHtml(token)}</span>
         </div>
-        <p>This token is valid for 24 hours. For security, never share this token with anyone.</p>
+        <p>This verification link and token are valid for 24 hours. For security, never share them with anyone.</p>
         <p>Regards,<br />Laboratory Department</p>
       </div>
     `,

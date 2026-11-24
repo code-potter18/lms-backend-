@@ -8,6 +8,7 @@ const crypto_1 = require("crypto");
 const client_1 = require("@prisma/client");
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const mail_1 = require("../../utils/mail");
+const patient_portal_service_1 = require("../patient-portal/patient-portal.service");
 /* A PROCESSING row older than this cannot still be sending - the process that
    owned it is gone. It is moved to FAILED so the delivery can be retried
    instead of blocking the report forever. */
@@ -265,6 +266,9 @@ class LabReportEmailService {
                         updated_at: failedAt,
                     },
                 });
+                // Trigger in-app notification: Report Email Delivery Failed
+                const eventKey = `REPORT_EMAIL_FAILED:${delivery.id}`;
+                patient_portal_service_1.PatientPortalService.createNotification(patientId, "Report Email Delivery Failed", "We could not send your laboratory report by email. Please contact the laboratory for assistance.", "REPORT_EMAIL_FAILED", `EMAIL_FAIL_${delivery.id}`, eventKey).catch(() => { });
                 throw new Error(reason);
             }
             const sentAt = new Date();
@@ -277,6 +281,9 @@ class LabReportEmailService {
                     updated_at: sentAt,
                 },
             });
+            // Trigger in-app notification: Report Email Successfully Sent
+            const eventKey = `REPORT_EMAIL_SENT:${delivery.id}`;
+            patient_portal_service_1.PatientPortalService.createNotification(patientId, "Report Email Sent", "Your laboratory report has been successfully sent to your registered email address.", "REPORT_EMAIL_SENT", `EMAIL_SENT_${delivery.id}`, eventKey).catch(() => { });
             return statusResponse(sent, patientId);
         }
         catch (error) {
@@ -309,6 +316,11 @@ class LabReportEmailService {
                     updated_at: failedAt,
                 },
             });
+            // Trigger in-app notification for genuine failure
+            if (!outcomeUnknown) {
+                const eventKey = `REPORT_EMAIL_FAILED:${delivery.id}`;
+                patient_portal_service_1.PatientPortalService.createNotification(patientId, "Report Email Delivery Failed", "We could not send your laboratory report by email. Please contact the laboratory for assistance.", "REPORT_EMAIL_FAILED", `EMAIL_FAIL_${delivery.id}`, eventKey).catch(() => { });
+            }
             if (outcomeUnknown) {
                 throw new Error("Email send outcome is unknown; retry is blocked to prevent duplicate delivery. Check the delivery status before taking further action.");
             }

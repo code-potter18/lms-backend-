@@ -7,7 +7,6 @@ exports.LabOrderItemService = void 0;
 const crypto_1 = require("crypto");
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const lab_order_item_repository_1 = require("./lab-order-item.repository");
-const patient_portal_service_1 = require("../patient-portal/patient-portal.service");
 const repository = new lab_order_item_repository_1.LabOrderItemRepository();
 // target_date arrives as an ISO date string ("2026-10-10"); the DATE column
 // needs a Date (Prisma rejects a bare date string). Absent = leave unchanged,
@@ -73,38 +72,6 @@ class LabOrderItemService {
             ...rest,
             ...toTargetDateData(target_date)
         });
-        if (data.item_status) {
-            prisma_1.default.lab_order_item
-                .findUnique({
-                where: { lab_order_item_id },
-                include: {
-                    lab_order: {
-                        include: { patient_history: true },
-                    },
-                    lab_test_master: true,
-                },
-            })
-                .then((item) => {
-                const patientId = item?.lab_order?.patient_history?.patient_id;
-                const testName = item?.lab_test_master?.test_name || "Diagnostic Test";
-                if (!patientId)
-                    return;
-                const s = data.item_status.toLowerCase();
-                if (s.includes("collect")) {
-                    patient_portal_service_1.PatientPortalService.createNotification(patientId, "Sample Collected", `Sample for ${testName} has been collected.`, "SAMPLE_COLLECTED", lab_order_item_id);
-                }
-                else if (s.includes("verif") || s.includes("accept")) {
-                    patient_portal_service_1.PatientPortalService.createNotification(patientId, "Sample Verified", `Sample for ${testName} has been verified and accepted by the lab.`, "SAMPLE_VERIFIED", lab_order_item_id);
-                }
-                else if (s.includes("testing") || s.includes("in-progress")) {
-                    patient_portal_service_1.PatientPortalService.createNotification(patientId, "Testing In Progress", `Testing has begun for ${testName}.`, "TESTING_STARTED", lab_order_item_id);
-                }
-                else if (s.includes("complete") || s.includes("review")) {
-                    patient_portal_service_1.PatientPortalService.createNotification(patientId, "Testing Completed", `Testing completed for ${testName}. Awaiting pathologist review.`, "TESTING_COMPLETED", lab_order_item_id);
-                }
-            })
-                .catch(() => { });
-        }
         return updated;
     }
     async delete(lab_order_item_id) {

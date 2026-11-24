@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -9,9 +42,10 @@ const bcrypt_1 = require("../../utils/bcrypt");
 const jwt_1 = require("../../utils/jwt");
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const idGenerator_1 = require("../../utils/idGenerator");
-const crypto_1 = require("crypto");
+const crypto_1 = __importStar(require("crypto"));
 const mail_1 = require("../../utils/mail");
 const roles_1 = require("../../permissions/roles");
+const patient_portal_service_1 = require("../patient-portal/patient-portal.service");
 class AuthService {
     authRepository = new auth_repository_1.AuthRepository();
     assertAccountUsable(user) {
@@ -21,6 +55,9 @@ class AuthService {
         if (role?.toUpperCase() === "PATIENT") {
             if (!user.patient_bio_data || user.patient_bio_data.length === 0) {
                 throw new Error("Patient profile not found. Please contact the administrator.");
+            }
+            if (user.user_status === 2) {
+                throw new Error("Your account is pending activation. Please check your email for the activation link or activate your account.");
             }
             return;
         }
@@ -158,6 +195,9 @@ class AuthService {
         if (!user) {
             throw new Error("Invalid username or password");
         }
+        if (user.role_type?.toUpperCase() === "PATIENT" && user.user_status === 2) {
+            throw new Error("Your account is pending activation. Please check your email for the activation link or activate your account.");
+        }
         const passwordMatched = await (0, bcrypt_1.comparePassword)(password, user.password);
         if (!passwordMatched) {
             throw new Error("Invalid username or password");
@@ -234,7 +274,7 @@ class AuthService {
         // });
         return this.buildAuthPayload(user, rememberMe);
     }
-    async requestPatientActivation(identifier) {
+    async requestPatientActivation(identifier, mode) {
         const trimmed = (identifier || "").trim();
         if (!trimmed) {
             throw new Error("Patient ID or email is required");
@@ -252,26 +292,31 @@ class AuthService {
             if (!patient || !patient.patient_id) {
                 throw new Error("No patient record found matching that Patient ID or email.");
             }
-            const defaultHash = await (0, bcrypt_1.hashPassword)(Math.random().toString(36));
-            await prisma_1.default.$transaction(async (tx) => {
-                const userId = await (0, idGenerator_1.generateId)(tx, "USER");
-                await tx.user_table.create({
-                    data: {
-                        user_id: userId,
-                        username: patient.patient_id,
-                        password: defaultHash,
-                        role_type: "PATIENT",
-                        created_by: "SYSTEM_ACTIVATION",
-                        branch_id: patient.branch_id,
-                        user_status: 0,
-                    },
+            if (patient.user_id) {
+                user = await this.authRepository.findUserById(patient.user_id);
+            }
+            if (!user) {
+                const defaultHash = await (0, bcrypt_1.hashPassword)(Math.random().toString(36));
+                await prisma_1.default.$transaction(async (tx) => {
+                    const userId = await (0, idGenerator_1.generateId)(tx, "USER");
+                    await tx.user_table.create({
+                        data: {
+                            user_id: userId,
+                            username: patient.patient_id,
+                            password: defaultHash,
+                            role_type: "PATIENT",
+                            created_by: "SYSTEM_ACTIVATION",
+                            branch_id: patient.branch_id,
+                            user_status: 2,
+                        },
+                    });
+                    await tx.patient_bio_data.update({
+                        where: { id: patient.id },
+                        data: { user_id: userId },
+                    });
                 });
-                await tx.patient_bio_data.update({
-                    where: { id: patient.id },
-                    data: { user_id: userId },
-                });
-            });
-            user = await this.authRepository.findUserByUsername(patient.patient_id);
+                user = await this.authRepository.findUserByUsername(patient.patient_id);
+            }
         }
         if (!user) {
             throw new Error("User account could not be resolved");
@@ -282,6 +327,37 @@ class AuthService {
         const patient = user.patient_bio_data?.[0];
         const email = patient?.patient_email;
         const patientName = [patient?.patient_first_name, patient?.patient_last_name].filter(Boolean).join(" ") || "Patient";
+        const isPending = user.user_status === 2;
+        // Requirement 4 & 5: When an ACTIVE patient clicks "Set your password & activate your account",
+        // do not show the password setup form again. Show a message explaining that the account is already
+        // activated and direct them to normal login. Only genuinely pending accounts can complete activation.
+        if (!isPending && mode !== "reset") {
+            return {
+                success: true,
+                isAlreadyActive: true,
+                message: "Your account is already active. Please log in using your username and password. If you forgot your password, use the Forgot Password option on the login page.",
+                patientId: patient?.patient_id,
+                username: user.username,
+            };
+        }
+        // Rate limit: 60 seconds cooldown between verification token requests
+        const recentOtp = await prisma_1.default.login_otp.findFirst({
+            where: {
+                user_id: user.user_id,
+                user_type: { in: ["PATIENT_ACTIVATION", "PASSWORD_RESET"] },
+                created_at: {
+                    gte: new Date(Date.now() - 60 * 1000),
+                },
+            },
+            orderBy: { created_at: "desc" },
+        });
+        if (recentOtp && recentOtp.created_at) {
+            const elapsedSeconds = Math.floor((Date.now() - new Date(recentOtp.created_at).getTime()) / 1000);
+            if (elapsedSeconds < 60) {
+                const remainingSeconds = 60 - elapsedSeconds;
+                throw new Error(`Please wait ${remainingSeconds} second${remainingSeconds === 1 ? "" : "s"} before requesting another verification code.`);
+            }
+        }
         await prisma_1.default.login_otp.updateMany({
             where: {
                 user_id: user.user_id,
@@ -290,6 +366,7 @@ class AuthService {
             },
             data: { is_verified: true },
         });
+        const tokenType = isPending ? "PATIENT_ACTIVATION" : "PASSWORD_RESET";
         const token = (0, crypto_1.randomInt)(100000, 999999).toString();
         const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
         await prisma_1.default.$transaction(async (tx) => {
@@ -298,26 +375,72 @@ class AuthService {
                 data: {
                     otp_id: otpId,
                     user_id: user.user_id,
-                    user_type: "PATIENT_ACTIVATION",
+                    user_type: tokenType,
                     otp_code: token,
                     expires_at: expiry,
                 },
             });
         });
         if (email) {
-            await (0, mail_1.sendPatientActivationEmail)(email, patientName, token).catch((e) => {
+            await (0, mail_1.sendPatientActivationEmail)(email, patientName, token, patient?.patient_id || undefined, user.username || undefined, !isPending).catch((e) => {
                 console.warn("Could not send activation email:", e.message);
             });
         }
         const emailMasked = email ? email.replace(/^(.{2}).*(@.*)$/, "$1***$2") : null;
         return {
             success: true,
-            message: email
-                ? `Activation token sent to ${emailMasked}. Check your email to set your password.`
-                : "Patient record found. Use the verification token to set your password.",
+            isAlreadyActive: false,
+            message: emailMasked
+                ? `A verification code has been sent to your registered email address (${emailMasked}).`
+                : "A verification code has been sent to your registered email address.",
             emailMasked,
             patientId: patient?.patient_id,
-            devToken: token,
+            username: user.username,
+        };
+    }
+    async verifyPatientToken(data) {
+        const { identifier, token } = data;
+        const trimmedId = (identifier || "").trim();
+        const trimmedToken = (token || "").trim();
+        if (!trimmedId || !trimmedToken) {
+            throw new Error("Identifier and verification code are required.");
+        }
+        const user = await this.authRepository.findUserByUsername(trimmedId);
+        if (!user) {
+            throw new Error("Patient user account not found.");
+        }
+        const isPending = user.user_status === 2;
+        const otpRecord = await prisma_1.default.login_otp.findFirst({
+            where: {
+                user_id: user.user_id,
+                user_type: { in: ["PATIENT_ACTIVATION", "PASSWORD_RESET"] },
+                otp_code: trimmedToken,
+                is_verified: false,
+            },
+            orderBy: { created_at: "desc" },
+        });
+        if (!otpRecord) {
+            const alreadyUsed = await prisma_1.default.login_otp.findFirst({
+                where: {
+                    user_id: user.user_id,
+                    otp_code: trimmedToken,
+                    is_verified: true,
+                },
+            });
+            if (alreadyUsed) {
+                throw new Error("This verification token has already been used. Please request a new code.");
+            }
+            throw new Error("Invalid verification code. Please check the code and try again.");
+        }
+        if (otpRecord.expires_at < new Date()) {
+            throw new Error("Verification code has expired. Please request a new one.");
+        }
+        if (otpRecord.user_type === "PATIENT_ACTIVATION" && !isPending) {
+            throw new Error("This account has already been activated. Please log in using your username and password.");
+        }
+        return {
+            success: true,
+            message: "Verification code confirmed successfully.",
         };
     }
     async setupPatientPassword(data) {
@@ -346,6 +469,7 @@ class AuthService {
         if (!user) {
             throw new Error("Patient user account not found.");
         }
+        const isPending = user.user_status === 2;
         const otpRecord = await prisma_1.default.login_otp.findFirst({
             where: {
                 user_id: user.user_id,
@@ -356,10 +480,25 @@ class AuthService {
             orderBy: { created_at: "desc" },
         });
         if (!otpRecord) {
-            throw new Error("Invalid or expired verification token.");
+            // Check if this token was already verified/used
+            const alreadyUsed = await prisma_1.default.login_otp.findFirst({
+                where: {
+                    user_id: user.user_id,
+                    otp_code: trimmedToken,
+                    is_verified: true,
+                },
+            });
+            if (alreadyUsed) {
+                throw new Error("This verification token has already been used. Please log in with your password or request a new code.");
+            }
+            throw new Error("Invalid verification token. Please check the code or request a new one.");
         }
         if (otpRecord.expires_at < new Date()) {
             throw new Error("Verification token has expired. Please request a new one.");
+        }
+        // Requirement 5: Only genuinely pending accounts can complete activation
+        if (otpRecord.user_type === "PATIENT_ACTIVATION" && !isPending) {
+            throw new Error("This account has already been activated. Please log in using your username and password.");
         }
         const hashedPassword = await (0, bcrypt_1.hashPassword)(newPassword);
         await prisma_1.default.$transaction(async (tx) => {
@@ -375,9 +514,26 @@ class AuthService {
                 data: { is_verified: true },
             });
         });
+        if (String(user.role_type || "").toUpperCase() === "PATIENT") {
+            const patient = await prisma_1.default.patient_bio_data.findFirst({
+                where: { user_id: user.user_id },
+                select: { patient_id: true },
+            });
+            const resolvedPatientId = patient?.patient_id || user.username;
+            if (resolvedPatientId) {
+                const opId = `RESET_${crypto_1.default.randomUUID()}`;
+                const eventKey = `PASSWORD_CHANGED:${resolvedPatientId}:${opId}`;
+                try {
+                    await patient_portal_service_1.PatientPortalService.createNotification(resolvedPatientId, "Password Changed", "Your account password has been changed successfully.", "PASSWORD_CHANGED", opId, eventKey);
+                }
+                catch (e) {
+                    console.warn("Could not record password change notification:", e.message);
+                }
+            }
+        }
         return {
             success: true,
-            message: "Password created successfully! You can now log in using your Patient ID or email.",
+            message: "Password set successfully! You can now log in using your username, Patient ID, or email.",
         };
     }
     // Self-service only - the caller can only ever change their own username,
@@ -404,7 +560,7 @@ class AuthService {
     }
     // Self-service only, same as changeUsername - requires the current
     // password to be re-entered, and userId always comes from the JWT.
-    async changePassword(userId, oldPassword, newPassword) {
+    async changePassword(userId, oldPassword, newPassword, operationId) {
         const user = await this.authRepository.findUserById(userId);
         if (!user) {
             throw new Error("User not found");
@@ -421,6 +577,19 @@ class AuthService {
             where: { id: user.id },
             data: { password: hashed },
         });
+        if (String(user.role_type || "").toUpperCase() === "PATIENT") {
+            const patient = await prisma_1.default.patient_bio_data.findFirst({
+                where: { user_id: user.user_id },
+                select: { patient_id: true },
+            });
+            const resolvedPatientId = patient?.patient_id || user.username;
+            if (resolvedPatientId) {
+                const opId = operationId || `OP_${crypto_1.default.randomUUID()}`;
+                const stableRef = `CHG_${opId}`;
+                const eventKey = `PASSWORD_CHANGED:${resolvedPatientId}:${stableRef}`;
+                patient_portal_service_1.PatientPortalService.createNotification(resolvedPatientId, "Password Changed", "Your account password has been changed successfully.", "PASSWORD_CHANGED", stableRef, eventKey).catch(() => { });
+            }
+        }
         return { message: "Password updated successfully" };
     }
 }

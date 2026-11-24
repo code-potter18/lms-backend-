@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PatientPortalService = void 0;
+const crypto_1 = __importDefault(require("crypto"));
 const prisma_1 = __importDefault(require("../../config/prisma"));
 class PatientPortalService {
     /**
@@ -95,10 +96,32 @@ class PatientPortalService {
         if (data.emergency_contact_number !== undefined) {
             updateData.Patient_emergency_mobile = data.emergency_contact_number?.trim() || null;
         }
+        if (Object.keys(updateData).length === 0) {
+            return {
+                success: true,
+                message: "No profile changes submitted",
+            };
+        }
+        // Check if any submitted field actually changed compared to existing record
+        const hasActualChanges = Object.keys(updateData).some((key) => {
+            const currentVal = patient[key] ?? null;
+            const newVal = updateData[key] ?? null;
+            return String(currentVal) !== String(newVal);
+        });
+        if (!hasActualChanges) {
+            return {
+                success: true,
+                message: "No profile changes detected",
+            };
+        }
         await prisma_1.default.patient_bio_data.update({
             where: { id: patient.id },
             data: updateData,
         });
+        // Stable operation ID across retries
+        const opId = data.operation_id || `OP_${crypto_1.default.randomUUID()}`;
+        const eventKey = `PROFILE_UPDATED:${patientId}:${opId}`;
+        await PatientPortalService.createNotification(patientId, "Patient Profile Updated", "Your profile information has been updated successfully.", "PROFILE_UPDATED", opId, eventKey).catch(() => { });
         return {
             success: true,
             message: "Contact information updated successfully",
@@ -584,22 +607,25 @@ class PatientPortalService {
         }
     }
     /**
-     * Create an in-app notification with strict deduplication
+     * Create an in-app notification with database-level deduplication via unique event_key
      */
-    static async createNotification(patientId, title, message, eventType, referenceId) {
+    static async createNotification(patientId, title, message, eventType, referenceId, eventKey) {
         try {
+            const computedEventKey = eventKey ||
+                (referenceId
+                    ? `${eventType}:${referenceId}`
+                    : `${eventType}:${patientId}:${Date.now()}`);
             // Check deduplication
-            if (referenceId) {
-                const existing = await prisma_1.default.$queryRawUnsafe(`SELECT notification_id FROM "patient_notification" 
-           WHERE patient_id = $1 AND event_type = $2 AND reference_id = $3 LIMIT 1`, patientId, eventType, referenceId);
-                if (existing && existing.length > 0) {
-                    return null; // Already notified
-                }
+            const existing = await prisma_1.default.$queryRawUnsafe(`SELECT notification_id FROM "patient_notification" 
+         WHERE event_key = $1 LIMIT 1`, computedEventKey);
+            if (existing && existing.length > 0) {
+                return null; // Already notified
             }
             const notifId = `PNOTIF${Date.now()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
             await prisma_1.default.$executeRawUnsafe(`INSERT INTO "patient_notification" 
-         (notification_id, patient_id, title, message, event_type, reference_id, is_read, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, false, NOW())`, notifId, patientId, title, message, eventType, referenceId || null);
+         (notification_id, patient_id, title, message, event_type, reference_id, event_key, is_read, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW())
+         ON CONFLICT ("event_key") DO NOTHING`, notifId, patientId, title, message, eventType, referenceId || null, computedEventKey);
             return notifId;
         }
         catch (err) {

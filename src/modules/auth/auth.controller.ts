@@ -304,14 +304,33 @@ export class AuthController {
 
     async requestPatientActivation(req: Request, res: Response) {
         try {
-            const { identifier } = req.body;
+            const { identifier, mode } = req.body;
             if (!identifier) {
                 return res.status(400).json({
                     success: false,
                     message: "Patient ID or email is required",
                 });
             }
-            const result = await authService.requestPatientActivation(identifier);
+            const result = await authService.requestPatientActivation(identifier, mode);
+            return res.status(200).json(result);
+        } catch (error: any) {
+            return res.status(400).json({
+                success: false,
+                message: error.message,
+            });
+        }
+    }
+
+    async verifyPatientToken(req: Request, res: Response) {
+        try {
+            const { identifier, token } = req.body;
+            if (!identifier || !token) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Identifier and verification code are required",
+                });
+            }
+            const result = await authService.verifyPatientToken({ identifier, token });
             return res.status(200).json(result);
         } catch (error: any) {
             return res.status(400).json({

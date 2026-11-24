@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import prisma from "../../config/prisma";
 import {
   PatientProfileResponse,
@@ -106,10 +107,44 @@ export class PatientPortalService {
       updateData.Patient_emergency_mobile = data.emergency_contact_number?.trim() || null;
     }
 
+    if (Object.keys(updateData).length === 0) {
+      return {
+        success: true,
+        message: "No profile changes submitted",
+      };
+    }
+
+    // Check if any submitted field actually changed compared to existing record
+    const hasActualChanges = Object.keys(updateData).some((key) => {
+      const currentVal = (patient as any)[key] ?? null;
+      const newVal = updateData[key] ?? null;
+      return String(currentVal) !== String(newVal);
+    });
+
+    if (!hasActualChanges) {
+      return {
+        success: true,
+        message: "No profile changes detected",
+      };
+    }
+
     await prisma.patient_bio_data.update({
       where: { id: patient.id },
       data: updateData,
     });
+
+    // Stable operation ID across retries
+    const opId = data.operation_id || `OP_${crypto.randomUUID()}`;
+    const eventKey = `PROFILE_UPDATED:${patientId}:${opId}`;
+
+    await PatientPortalService.createNotification(
+      patientId,
+      "Patient Profile Updated",
+      "Your profile information has been updated successfully.",
+      "PROFILE_UPDATED",
+      opId,
+      eventKey
+    ).catch(() => {});
 
     return {
       success: true,
@@ -649,41 +684,46 @@ export class PatientPortalService {
   }
 
   /**
-   * Create an in-app notification with strict deduplication
+   * Create an in-app notification with database-level deduplication via unique event_key
    */
   static async createNotification(
     patientId: string,
     title: string,
     message: string,
     eventType: string,
-    referenceId?: string
+    referenceId?: string,
+    eventKey?: string
   ) {
     try {
+      const computedEventKey =
+        eventKey ||
+        (referenceId
+          ? `${eventType}:${referenceId}`
+          : `${eventType}:${patientId}:${Date.now()}`);
+
       // Check deduplication
-      if (referenceId) {
-        const existing: any[] = await prisma.$queryRawUnsafe(
-          `SELECT notification_id FROM "patient_notification" 
-           WHERE patient_id = $1 AND event_type = $2 AND reference_id = $3 LIMIT 1`,
-          patientId,
-          eventType,
-          referenceId
-        );
-        if (existing && existing.length > 0) {
-          return null; // Already notified
-        }
+      const existing: any[] = await prisma.$queryRawUnsafe(
+        `SELECT notification_id FROM "patient_notification" 
+         WHERE event_key = $1 LIMIT 1`,
+        computedEventKey
+      );
+      if (existing && existing.length > 0) {
+        return null; // Already notified
       }
 
       const notifId = `PNOTIF${Date.now()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
       await prisma.$executeRawUnsafe(
         `INSERT INTO "patient_notification" 
-         (notification_id, patient_id, title, message, event_type, reference_id, is_read, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, false, NOW())`,
+         (notification_id, patient_id, title, message, event_type, reference_id, event_key, is_read, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW())
+         ON CONFLICT ("event_key") DO NOTHING`,
         notifId,
         patientId,
         title,
         message,
         eventType,
-        referenceId || null
+        referenceId || null,
+        computedEventKey
       );
       return notifId;
     } catch (err: any) {

@@ -110,8 +110,12 @@ class LabOrderService {
                     ...orderData,
                     lab_order_id: nextLabOrderId()
                 });
-                if (data.patient_id) {
-                    patient_portal_service_1.PatientPortalService.createNotification(data.patient_id, "Test Registered", `Your laboratory order #${created.lab_order_id} has been registered.`, "TEST_REGISTERED", created.lab_order_id).catch(() => { });
+                const targetPatientId = data.patient_id || patient?.patient_id;
+                if (targetPatientId) {
+                    const eventKey = `LAB_ORDER_REGISTERED:${created.lab_order_id}`;
+                    await patient_portal_service_1.PatientPortalService.createNotification(targetPatientId, "Lab Order Registered", `Your lab order ${created.lab_order_id} has been registered successfully.`, "LAB_ORDER_REGISTERED", created.lab_order_id, eventKey).catch((err) => {
+                        console.error("[Notification] Failed to create order notification:", err.message);
+                    });
                 }
                 return created;
             }

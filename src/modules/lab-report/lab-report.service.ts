@@ -1,7 +1,6 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma";
 import { LabReportRepository } from "./lab-report.repository";
-import { PatientPortalService } from "../patient-portal/patient-portal.service";
 import { sendPatientReportAvailableEmail } from "../../utils/mail";
 import {
   CreateLabReportDto,
@@ -421,24 +420,6 @@ export class LabReportService {
         const testNames = ((finalSavedReport.lab_order as any)?.lab_order_item || [])
           .map((i: any) => i.lab_test_master?.test_name)
           .filter(Boolean);
-        const testsStr = testNames.length > 0 ? ` (${testNames.join(", ")})` : "";
-
-        // Trigger in-app notifications
-        PatientPortalService.createNotification(
-          patientId,
-          "Report Approved",
-          `Your laboratory diagnostic report #${finalSavedReport.lab_report_id}${testsStr} has been approved.`,
-          "REPORT_APPROVED",
-          finalSavedReport.lab_report_id
-        ).catch(() => {});
-
-        PatientPortalService.createNotification(
-          patientId,
-          "Report Available",
-          `Your laboratory report #${finalSavedReport.lab_report_id} is now available in your Patient Portal for viewing and download.`,
-          "REPORT_AVAILABLE",
-          finalSavedReport.lab_report_id
-        ).catch(() => {});
 
         // Trigger email notification if patient email exists
         prisma.patient_bio_data

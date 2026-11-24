@@ -8,7 +8,10 @@ export class PatientRepository {
 
         return prisma.user_table.findFirst({
             where: {
-                username
+                username: {
+                    equals: (username || "").trim(),
+                    mode: "insensitive"
+                }
             }
         });
 

@@ -27,6 +27,10 @@ router.post(
     authController.requestPatientActivation.bind(authController)
 );
 router.post(
+    "/patient/verify-token",
+    authController.verifyPatientToken.bind(authController)
+);
+router.post(
     "/patient/setup-password",
     authController.setupPatientPassword.bind(authController)
 );

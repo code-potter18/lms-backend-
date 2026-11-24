@@ -3,7 +3,7 @@ import prisma from "../../config/prisma";
 import { EmployeeRepository } from "./employee.repository";
 import { CreateEmployeeDto, UpdateEmployeeDto, GetEmployeesQuery, WorkingHourDto } from "./employee.types";
 import { generateId } from "../../utils/idGenerator";
-import { TOP_LEVEL_ADMIN_ROLES, BRANCH_ADMIN, ADMIN } from "../../permissions/roles";
+import { TOP_LEVEL_ADMIN_ROLES, BRANCH_ADMIN, ADMIN, LAB_TECHNICIAN } from "../../permissions/roles";
 import { permissionService } from "../permission/permission.service";
 
 const repository = new EmployeeRepository();
@@ -108,6 +108,7 @@ export class EmployeeService {
     const isTopLevelAdmin = TOP_LEVEL_ADMIN_ROLES.some(r => r === creatorRole);
     const isBranchAdmin = creatorRole === BRANCH_ADMIN;
     const isStaffAdmin = creatorRole === ADMIN;
+    const isLabTechnician = creatorRole === LAB_TECHNICIAN;
 
     // Validate role creation permissions
     const targetRole = data.role_type?.toUpperCase() ?? "";
@@ -126,9 +127,16 @@ export class EmployeeService {
         }
     }
 
-    // For BRANCH_ADMIN and STAFF_ADMIN, force branch to their assigned branch unless creating DOCTOR with doctor.assign_global permission
+    if (isLabTechnician) {
+        // LAB_TECHNICIAN can only create STAFF or LAB_TECHNICIAN roles
+        if (targetRole !== "STAFF" && targetRole !== "LAB_TECHNICIAN") {
+            throw new Error("Lab Technician can only create Staff or Lab Technician records");
+        }
+    }
+
+    // For BRANCH_ADMIN, STAFF_ADMIN and LAB_TECHNICIAN, force branch to their assigned branch unless creating DOCTOR with doctor.assign_global permission
     let allowedBranchIds: string[] = data.branch_ids;
-    if (isBranchAdmin || isStaffAdmin) {
+    if (isBranchAdmin || isStaffAdmin || isLabTechnician) {
         const canAssignDoctorGlobally = targetRole === "DOCTOR" && (
             isTopLevelAdmin ||
             await permissionService.hasPermission(creatorRole, "doctor.assign_global")
@@ -139,19 +147,37 @@ export class EmployeeService {
                 where: { user_id: createdBy, status: 1 },
                 select: { branch_id: true }
             });
-            const userBranchIds = mappings.map(m => m.branch_id);
+            let userBranchIds = mappings.map(m => m.branch_id);
             
+            if (userBranchIds.length === 0) {
+                const creatorEmployee = await prisma.employees.findFirst({
+                    where: { user_id: createdBy },
+                    select: { branch_id: true }
+                });
+                const creatorUser = await prisma.user_table.findUnique({
+                    where: { user_id: createdBy },
+                    select: { branch_id: true }
+                });
+                const fallbackBranch = creatorEmployee?.branch_id || creatorUser?.branch_id;
+                if (fallbackBranch) {
+                    userBranchIds = [fallbackBranch];
+                }
+            }
+
             if (userBranchIds.length === 0) {
                 throw new Error("No branch assigned to your account");
             }
             
-            // Force single branch - use first assigned branch
-            allowedBranchIds = [userBranchIds[0]];
-            
-            // Validate that the requested branch is within their allowed branches
-            const invalidBranches = data.branch_ids.filter(b => !userBranchIds.includes(b));
-            if (invalidBranches.length > 0) {
-                throw new Error("You can only create employees in your assigned branch(es)");
+            // Force single branch - use first assigned branch if data.branch_ids is empty or not provided
+            if (!Array.isArray(data.branch_ids) || data.branch_ids.length === 0) {
+                allowedBranchIds = [userBranchIds[0]];
+            } else {
+                // Validate that the requested branch is within their allowed branches
+                const invalidBranches = data.branch_ids.filter(b => !userBranchIds.includes(b));
+                if (invalidBranches.length > 0) {
+                    throw new Error("You can only create employees in your assigned branch(es)");
+                }
+                allowedBranchIds = data.branch_ids;
             }
         } else {
             if (!Array.isArray(data.branch_ids) || data.branch_ids.length === 0) {

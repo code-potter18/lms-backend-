@@ -60,6 +60,19 @@ const branchScope = async (req, res, next) => {
         });
         const allowedBranches = mappings.map((m) => m.branch_id);
         if (allowedBranches.length === 0) {
+            const fallbackUser = await prisma_1.default.user_table.findUnique({
+                where: { user_id: user.user_id },
+                select: {
+                    branch_id: true,
+                    employees: { select: { branch_id: true } }
+                }
+            });
+            const fbBranch = fallbackUser?.employees?.branch_id || fallbackUser?.branch_id;
+            if (fbBranch) {
+                allowedBranches.push(fbBranch);
+            }
+        }
+        if (allowedBranches.length === 0) {
             return res.status(403).json({
                 success: false,
                 message: "No branch has been assigned to your account.",

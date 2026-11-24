@@ -1,4 +1,5 @@
 import bcrypt from "bcrypt";
+import crypto, { randomInt } from "crypto";
 import { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma";
 import { PatientRepository } from "./patient.repository";
@@ -11,6 +12,8 @@ import {
 import { CreatePatientHistoryDTO } from "./patient-history.types";
 import { generateId } from "../../utils/idGenerator";
 import { phoneMatchVariants } from "./patient-contact.utils";
+import { hashPassword } from "../../utils/bcrypt";
+import { sendPatientActivationEmail } from "../../utils/mail";
 
 const repository = new PatientRepository();
 
@@ -28,13 +31,7 @@ export class PatientService {
         );
     }
 
-    async createPatient(data: CreatePatientRequest,createdBy: string) {
-
-        const username = await repository.findUsername(data.username);
-
-        if (username) {
-            throw new Error("Username already exists");
-        }
+    async createPatient(data: CreatePatientRequest, createdBy: string) {
 
         const contactDuplicates = await this.findContactDuplicates(data.mobile, data.email);
         if (contactDuplicates.some((match) => match.matched_by_mobile)) {
@@ -50,16 +47,46 @@ export class PatientService {
             throw new Error("Branch not found");
         }
 
-        const hashedPassword = await bcrypt.hash(
-            data.password,
-            Number(process.env.BCRYPT_SALT_ROUNDS)
-        );
+        // Generate a unique portal username based on the patient's First Name
+        let finalUsername: string;
+        const isLabWalkIn = data.registration_source === "LAB_WALK_IN";
+        const hasExplicitCustomUsername =
+            data.username &&
+            !isLabWalkIn &&
+            !data.username.startsWith("walkin_") &&
+            !/^PAT\d+$/i.test(data.username.trim());
 
-        return prisma.$transaction(async (tx) => {
+        if (hasExplicitCustomUsername) {
+            const trimmed = data.username!.trim().toLowerCase();
+            const existing = await repository.findUsername(trimmed);
+            if (existing) {
+                throw new Error("Username already exists");
+            }
+            finalUsername = trimmed;
+        } else {
+            const cleanFirst = (data.first_name || "")
+                .trim()
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, "");
+
+            const baseUsername = cleanFirst || "patient";
+            let candidate = baseUsername;
+            let counter = 2;
+            while (await repository.findUsername(candidate)) {
+                candidate = `${baseUsername}${counter}`;
+                counter++;
+            }
+            finalUsername = candidate;
+        }
+
+        const hashedPassword = data.password
+            ? await hashPassword(data.password)
+            : await hashPassword(crypto.randomUUID());
+
+        const result = await prisma.$transaction(async (tx) => {
 
             const patientId = await generateId(tx, "PATIENT");
             const userId = await generateId(tx, "USER");
-            const finalUsername = (data.username && !data.username.startsWith("walkin_")) ? data.username : patientId;
 
             const user = await tx.user_table.create({
 
@@ -77,7 +104,7 @@ export class PatientService {
 
                     branch_id: data.branch_id,
 
-                    user_status: 0
+                    user_status: 2 // PENDING_ACTIVATION
 
                 }
 
@@ -160,23 +187,58 @@ export class PatientService {
             });
 
 
-            return {
+            // Create single-use activation token expiring in 24 hours
+            const activationToken = randomInt(100000, 999999).toString();
+            const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+            const otpId = await generateId(tx, "LOGIN_OTP");
+            await tx.login_otp.create({
+                data: {
+                    otp_id: otpId,
+                    user_id: userId,
+                    user_type: "PATIENT_ACTIVATION",
+                    otp_code: activationToken,
+                    expires_at: expiry,
+                    is_verified: false,
+                }
+            });
 
+            return {
                 patient: {
                     patient_id: patient.patient_id,
                     patient_first_name: patient.patient_first_name,
                     patient_middle_name: patient.patient_middle_name,
                     patient_last_name: patient.patient_last_name
                 },
-
                 user: {
                     user_id: user.user_id,
-                    username: user.username
-                }
-
+                    username: user.username,
+                    user_status: "PENDING_ACTIVATION"
+                },
+                activationToken,
+                patientEmail: data.email,
+                patientFullName: [data.first_name, data.last_name].filter(Boolean).join(" ")
             };
 
         });
+
+        // Send activation email with the secure activation link and token
+        if (result.patientEmail) {
+            await sendPatientActivationEmail(
+                result.patientEmail,
+                result.patientFullName,
+                result.activationToken,
+                result.patient.patient_id,
+                result.user.username,
+                false
+            ).catch((err: any) => {
+                console.warn("Could not send patient activation email:", err.message);
+            });
+        }
+
+        return {
+            patient: result.patient,
+            user: result.user
+        };
 
     }
 
